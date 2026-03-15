@@ -2,8 +2,16 @@ import * as THREE from 'three'
 import RAPIER from '@dimforge/rapier3d-compat'
 
 import { BattleAudio } from './audio'
+import {
+  createStarterCastleDesign,
+  designCaptainAnchor,
+  designCannonAnchors,
+  designToPlacements,
+} from './castle-designs'
 import { buildParticipantsFromSeats, buildParticipantsFromSlots, CASTLE_MIN_HEIGHT, TEAM_LABELS, presetLabel } from './config'
+import { ParticleSystem } from './particle-system'
 import type {
+  CastleDesign,
   CannonSnapshot,
   GameSnapshot,
   LocalMatchRequest,
@@ -91,14 +99,6 @@ type SyncBody = {
   mesh: THREE.Object3D
 }
 
-type ParticleState = {
-  mesh: THREE.Mesh
-  velocity: THREE.Vector3
-  gravity: number
-  life: number
-  maxLife: number
-}
-
 type NetworkAdapter =
   | { kind: 'local' }
   | {
@@ -110,6 +110,7 @@ type NetworkAdapter =
 type MatchSeed = {
   preset: MatchPreset
   participants: MatchParticipant[]
+  castleDesigns?: CastleDesign[]
   currentPlayerIndex?: number
   turnNumber?: number
   phase?: RoomPhase
@@ -130,6 +131,7 @@ const clamp = THREE.MathUtils.clamp
 const degToRad = THREE.MathUtils.degToRad
 const radToDeg = THREE.MathUtils.radToDeg
 const WORLD_UP = new THREE.Vector3(0, 1, 0)
+const DEFAULT_CASTLE_DESIGN = createStarterCastleDesign('Royal Bastion', 'Crown')
 
 export class GameApp {
   private readonly ui: GameUIRefs
@@ -148,9 +150,10 @@ export class GameApp {
   private castles: CastleState[] = []
   private projectiles: ProjectileState[] = []
   private syncedBodies: SyncBody[] = []
-  private particles: ParticleState[] = []
   private keysDown = new Set<string>()
   private network: NetworkAdapter = { kind: 'local' }
+  private castleDesigns = new Map<number, CastleDesign>()
+  private particleSystem!: ParticleSystem
 
   private currentPlayerIndex = 0
   private selectedCannonIndex = 0
@@ -179,9 +182,8 @@ export class GameApp {
   private readonly wheelMaterial = new THREE.MeshStandardMaterial({ color: '#6d4c41', roughness: 0.82 })
   private readonly shadowMaterial = new THREE.MeshStandardMaterial({ color: '#6b705c', roughness: 1 })
   private readonly ballMaterial = new THREE.MeshStandardMaterial({ color: '#2f2f2f', metalness: 0.35, roughness: 0.5 })
-  private readonly smokeMaterial = new THREE.MeshStandardMaterial({ color: '#d9d3ca', transparent: true, opacity: 0.9 })
-  private readonly sparkMaterial = new THREE.MeshStandardMaterial({ color: '#edae49', emissive: '#7f4f24' })
-  private readonly particleGeometry = new THREE.SphereGeometry(0.16, 8, 8)
+  private readonly boxGeometryCache = new Map<string, THREE.BoxGeometry>()
+  private readonly stoneMaterialCache = new Map<string, THREE.MeshStandardMaterial>()
 
   constructor(ui: GameUIRefs) {
     this.ui = ui
@@ -194,6 +196,7 @@ export class GameApp {
     this.scene = new THREE.Scene()
     this.scene.background = new THREE.Color('#d9d0c4')
     this.scene.fog = new THREE.Fog('#d9d0c4', 55, 120)
+    this.particleSystem = new ParticleSystem(this.scene, 640)
 
     this.camera = new THREE.PerspectiveCamera(52, 1, 0.1, 250)
     this.camera.position.set(18, 20, 26)
@@ -226,7 +229,7 @@ export class GameApp {
     }
 
     this.network = { kind: 'local' }
-    this.startFromSeed({ preset: request.preset, participants })
+    this.startFromSeed({ preset: request.preset, participants, castleDesigns: request.castleDesigns })
     return true
   }
 
@@ -241,7 +244,7 @@ export class GameApp {
       session: request.session,
       commitSnapshot: request.commitSnapshot,
     }
-    this.startFromSeed({ preset: request.preset, participants })
+    this.startFromSeed({ preset: request.preset, participants, castleDesigns: undefined })
     return this.exportSnapshot()
   }
 
@@ -263,6 +266,7 @@ export class GameApp {
     this.turnNumber = snapshot.turnNumber
     this.currentPlayerIndex = snapshot.currentPlayerIndex
     this.players = snapshot.players.map((player) => ({ ...player }))
+    this.castleDesigns.clear()
     this.selectedCannonIndex = 0
     this.aiPendingForPlayerId = null
     this.aiDueAt = 0
@@ -330,6 +334,7 @@ export class GameApp {
     this.turnNumber = seed.turnNumber ?? 1
     this.currentPlayerIndex = seed.currentPlayerIndex ?? 0
     this.players = seed.participants.map((participant) => ({ ...participant }))
+    this.castleDesigns = new Map((seed.castleDesigns ?? []).map((design, index) => [index, design]))
     this.selectedCannonIndex = 0
     this.aiPendingForPlayerId = null
     this.aiDueAt = 0
@@ -361,18 +366,15 @@ export class GameApp {
       this.scene.remove(castle.group)
     })
 
-    this.particles.forEach((particle) => {
-      this.scene.remove(particle.mesh)
-    })
-
     this.projectiles = []
     this.castles = []
     this.players = []
     this.syncedBodies = []
-    this.particles = []
+    this.castleDesigns.clear()
     this.isCharging = false
     this.settleMinUntil = 0
     this.settleMaxUntil = 0
+    this.particleSystem?.clear()
   }
 
   private buildEnvironment(): void {
@@ -435,12 +437,12 @@ export class GameApp {
       const angle = (index / this.players.length) * Math.PI * 2
       const origin = new THREE.Vector3(Math.cos(angle) * radius, 0, Math.sin(angle) * radius)
       const rotationY = angle + Math.PI / 2
-      player.castle = this.createCastle(player, origin, rotationY)
+      player.castle = this.createCastle(player, origin, rotationY, this.castleDesigns.get(player.id))
       this.castles.push(player.castle)
     })
   }
 
-  private createCastle(player: PlayerState, origin: THREE.Vector3, rotationY: number): CastleState {
+  private createCastle(player: PlayerState, origin: THREE.Vector3, rotationY: number, design?: CastleDesign): CastleState {
     const group = new THREE.Group()
     group.position.copy(origin)
     group.rotation.y = rotationY
@@ -457,7 +459,7 @@ export class GameApp {
       rotationY,
     }
 
-    const placements = this.generateCastleBlueprint()
+    const placements = this.generateCastleBlueprint(design)
     placements.forEach(({ position, size, tint }) => {
       const worldPosition = position.clone().applyAxisAngle(WORLD_UP, rotationY).add(origin)
       const body = this.world.createRigidBody(
@@ -468,7 +470,7 @@ export class GameApp {
         body,
       )
 
-      const mesh = new THREE.Mesh(new THREE.BoxGeometry(size.x, size.y, size.z), new THREE.MeshStandardMaterial({ color: tint, roughness: 0.95 }))
+      const mesh = new THREE.Mesh(this.getBoxGeometry(size), this.getStoneMaterial(tint))
       mesh.castShadow = true
       mesh.receiveShadow = true
       this.scene.add(mesh)
@@ -477,78 +479,22 @@ export class GameApp {
       this.syncedBodies.push({ body, mesh })
     })
 
-    this.createCaptain(castle)
-    castle.cannons = this.createCannons(castle)
+    this.createCaptain(castle, design)
+    castle.cannons = this.createCannons(castle, design)
     this.updateCastleHeight(castle)
     return castle
   }
 
-  private generateCastleBlueprint(): Array<{ position: THREE.Vector3; size: THREE.Vector3; tint: string }> {
-    const blocks = new Map<string, { position: THREE.Vector3; size: THREE.Vector3; tint: string }>()
-    const addBlock = (x: number, y: number, z: number, size = new THREE.Vector3(1.1, 0.7, 1.1), tint = '#bab7b0') => {
-      const key = `${x.toFixed(2)}:${y.toFixed(2)}:${z.toFixed(2)}:${size.x.toFixed(2)}:${size.y.toFixed(2)}:${size.z.toFixed(2)}`
-      if (!blocks.has(key)) {
-        blocks.set(key, { position: new THREE.Vector3(x, y, z), size: size.clone(), tint })
-      }
-    }
-
-    const wallLevels = 5
-    const wallHalf = 5.7
-    const spacing = 1.18
-
-    for (let level = 0; level < wallLevels; level += 1) {
-      const y = 0.35 + level * 0.72
-      for (let step = -4; step <= 4; step += 1) {
-        addBlock(step * spacing, y, wallHalf)
-        addBlock(step * spacing, y, -wallHalf)
-      }
-      for (let step = -3; step <= 3; step += 1) {
-        addBlock(wallHalf, y, step * spacing)
-        addBlock(-wallHalf, y, step * spacing)
-      }
-    }
-
-    for (let step = -4; step <= 4; step += 2) {
-      addBlock(step * spacing, 4.18, wallHalf, new THREE.Vector3(1.05, 0.62, 1.08), '#d0cbc1')
-      addBlock(step * spacing, 4.18, -wallHalf, new THREE.Vector3(1.05, 0.62, 1.08), '#d0cbc1')
-    }
-    for (let step = -3; step <= 3; step += 2) {
-      addBlock(wallHalf, 4.18, step * spacing, new THREE.Vector3(1.08, 0.62, 1.05), '#d0cbc1')
-      addBlock(-wallHalf, 4.18, step * spacing, new THREE.Vector3(1.08, 0.62, 1.05), '#d0cbc1')
-    }
-
-    const towerCenters = [new THREE.Vector2(-5.7, -5.7), new THREE.Vector2(5.7, -5.7), new THREE.Vector2(-5.7, 5.7), new THREE.Vector2(5.7, 5.7)]
-    towerCenters.forEach((center) => {
-      for (let level = 0; level < 8; level += 1) {
-        const y = 0.35 + level * 0.72
-        for (let x = -1; x <= 1; x += 1) {
-          for (let z = -1; z <= 1; z += 1) {
-            addBlock(center.x + x * 1.04, y, center.y + z * 1.04, new THREE.Vector3(1.02, 0.7, 1.02), '#b6b2ab')
-          }
-        }
-      }
-      addBlock(center.x, 6.1, center.y, new THREE.Vector3(2.3, 0.65, 2.3), '#d7d2c8')
-    })
-
-    for (let level = 0; level < 4; level += 1) {
-      const y = 0.35 + level * 0.72
-      for (let x = -2; x <= 2; x += 1) {
-        for (let z = -2; z <= 2; z += 1) {
-          addBlock(x * 1.12, y, z * 1.12, new THREE.Vector3(1.02, 0.7, 1.02), '#a9a59d')
-        }
-      }
-    }
-
-    addBlock(0, 3.55, 0, new THREE.Vector3(6.1, 0.6, 6.1), '#cbc8c1')
-    addBlock(0, 4.25, -5.72, new THREE.Vector3(2.1, 0.55, 0.8), '#8d6748')
-    addBlock(0, 1.1, -5.2, new THREE.Vector3(1.4, 2.1, 0.75), '#6b4f3a')
-    addBlock(-1.35, 1.45, -4.1, new THREE.Vector3(1.15, 1.35, 1.15), '#9f9a92')
-    addBlock(1.35, 1.45, -4.1, new THREE.Vector3(1.15, 1.35, 1.15), '#9f9a92')
-
-    return Array.from(blocks.values())
+  private generateCastleBlueprint(design?: CastleDesign): Array<{ position: THREE.Vector3; size: THREE.Vector3; tint: string }> {
+    const source = design ?? DEFAULT_CASTLE_DESIGN
+    return designToPlacements(source).map((placement) => ({
+      position: new THREE.Vector3(...placement.position),
+      size: new THREE.Vector3(...placement.size),
+      tint: placement.tint,
+    }))
   }
 
-  private createCaptain(castle: CastleState): void {
+  private createCaptain(castle: CastleState, design?: CastleDesign): void {
     const captain = new THREE.Group()
     const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.28, 0.85, 6, 12), new THREE.MeshStandardMaterial({ color: castle.player.color, roughness: 0.78 }))
     body.castShadow = true
@@ -562,16 +508,18 @@ export class GameApp {
     plume.castShadow = true
 
     captain.add(body, head, plume)
-    captain.position.set(0, 5.3, 0)
+    const [x, y, z] = designCaptainAnchor(design ?? DEFAULT_CASTLE_DESIGN)
+    captain.position.set(x, y, z)
     castle.group.add(captain)
   }
 
-  private createCannons(castle: CastleState): CannonState[] {
+  private createCannons(castle: CastleState, design?: CastleDesign): CannonState[] {
+    const anchors = designCannonAnchors(design ?? DEFAULT_CASTLE_DESIGN)
     const mounts = [
-      { anchor: new THREE.Vector3(-5.6, 6.55, -5.35), aim: new THREE.Vector3(0, 0, -1) },
-      { anchor: new THREE.Vector3(5.6, 6.55, -5.35), aim: new THREE.Vector3(0, 0, -1) },
-      { anchor: new THREE.Vector3(0, 4.95, 5.95), aim: new THREE.Vector3(0, 0, 1) },
-      { anchor: new THREE.Vector3(0, 4.95, -5.95), aim: new THREE.Vector3(0, 0, -1) },
+      { anchor: new THREE.Vector3(...anchors[0]), aim: new THREE.Vector3(-0.25, 0, -1) },
+      { anchor: new THREE.Vector3(...anchors[1]), aim: new THREE.Vector3(0.25, 0, -1) },
+      { anchor: new THREE.Vector3(...anchors[2]), aim: new THREE.Vector3(0, 0, 1) },
+      { anchor: new THREE.Vector3(...anchors[3]), aim: new THREE.Vector3(0, 0, -1) },
     ]
 
     return mounts.map((mount, index) => {
@@ -995,19 +943,7 @@ export class GameApp {
   }
 
   private updateParticles(delta: number): void {
-    this.particles = this.particles.filter((particle) => {
-      particle.life -= delta
-      particle.velocity.y -= particle.gravity * delta
-      particle.mesh.position.addScaledVector(particle.velocity, delta)
-      const lifeRatio = Math.max(0, particle.life / particle.maxLife)
-      particle.mesh.scale.setScalar(lifeRatio)
-      ;(particle.mesh.material as THREE.MeshStandardMaterial).opacity = lifeRatio
-      if (particle.life <= 0) {
-        this.scene.remove(particle.mesh)
-        return false
-      }
-      return true
-    })
+    this.particleSystem.update(delta)
   }
 
   private updateCastleHeights(): void {
@@ -1304,19 +1240,43 @@ export class GameApp {
   }
 
   private spawnParticleBurst(origin: THREE.Vector3, options: { count: number; color: string; scale: number; life: number; speed: number; gravity: number; align?: THREE.Vector3 }): void {
-    for (let index = 0; index < options.count; index += 1) {
-      const material = (options.color === '#edae49' ? this.sparkMaterial : this.smokeMaterial).clone()
-      material.color = new THREE.Color(options.color)
-      material.transparent = true
-      const mesh = new THREE.Mesh(this.particleGeometry, material)
-      mesh.position.copy(origin)
+    const color = new THREE.Color(options.color)
+    const seeds = Array.from({ length: options.count }, () => {
       const direction = options.align
         ? options.align.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.8, (Math.random() - 0.3) * 0.6, (Math.random() - 0.5) * 0.8)).normalize()
         : new THREE.Vector3(Math.random() - 0.5, Math.random() * 0.9, Math.random() - 0.5).normalize()
-      mesh.scale.setScalar(options.scale * (0.6 + Math.random() * 0.8))
-      this.scene.add(mesh)
-      this.particles.push({ mesh, velocity: direction.multiplyScalar(options.speed * (0.7 + Math.random() * 0.7)), gravity: options.gravity, life: options.life, maxLife: options.life })
+
+      return {
+        origin: origin.clone(),
+        direction,
+        color,
+        life: options.life * (0.75 + Math.random() * 0.4),
+        speed: options.speed * (0.7 + Math.random() * 0.7),
+        gravity: options.gravity,
+      }
+    })
+    this.particleSystem.spawnBurst(seeds)
+  }
+
+  private getBoxGeometry(size: THREE.Vector3): THREE.BoxGeometry {
+    const key = `${size.x.toFixed(2)}:${size.y.toFixed(2)}:${size.z.toFixed(2)}`
+    const cached = this.boxGeometryCache.get(key)
+    if (cached) {
+      return cached
     }
+    const geometry = new THREE.BoxGeometry(size.x, size.y, size.z)
+    this.boxGeometryCache.set(key, geometry)
+    return geometry
+  }
+
+  private getStoneMaterial(color: string): THREE.MeshStandardMaterial {
+    const cached = this.stoneMaterialCache.get(color)
+    if (cached) {
+      return cached
+    }
+    const material = new THREE.MeshStandardMaterial({ color, roughness: 0.95 })
+    this.stoneMaterialCache.set(color, material)
+    return material
   }
 
   private getCurrentPlayer(): PlayerState | undefined {

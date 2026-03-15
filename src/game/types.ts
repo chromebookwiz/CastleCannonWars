@@ -13,9 +13,23 @@ export type MatchParticipant = {
   alive: boolean
 }
 
+export type CastleBrick = {
+  x: number
+  y: number
+  z: number
+}
+
+export type CastleDesign = {
+  id: string
+  name: string
+  author: string
+  bricks: CastleBrick[]
+}
+
 export type LocalMatchRequest = {
   preset: MatchPreset
   slots: SlotOption[]
+  castleDesigns?: CastleDesign[]
 }
 
 export type OnlineSeat = {
@@ -97,4 +111,17 @@ export type OnlineSession = {
   playerId: number
   isHost: boolean
   displayName: string
+}
+
+export type SharedCastleDesign = CastleDesign & {
+  createdAt: number
+  brickCount: number
+}
+
+export type SharedCastleListResponse = {
+  castles: SharedCastleDesign[]
+}
+
+export type PublishCastleDesignResponse = {
+  castle: SharedCastleDesign
 }

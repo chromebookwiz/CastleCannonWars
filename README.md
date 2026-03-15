@@ -1,6 +1,6 @@
 # Castle Cannon Wars
 
-Three.js + Rapier turn-based destruction game with local skirmishes, AI captains, and Vercel-ready online room support.
+Three.js + Rapier turn-based destruction game with local skirmishes, AI captains, custom castle construction, public shared designs, and Vercel-ready online room support.
 
 ## Features
 
@@ -8,6 +8,8 @@ Three.js + Rapier turn-based destruction game with local skirmishes, AI captains
 - Match presets: `1v1`, `1v1v1`, `1v1v1v1`, and `2v2`.
 - Manual cannonball loading, powder charge control, aiming, recoil, smoke, sparks, and AI turns.
 - Local hot-seat play or online hosted rooms using Vercel serverless APIs.
+- Create A Castle mode with a fixed brick budget and four auto-mounted cannons per fortress.
+- Shared Castles archive backed by Vercel APIs so published designs can be reused for custom duels.
 
 ## Local Development
 
@@ -39,3 +41,5 @@ npm run build
 4. Deploy.
 
 If the KV env vars are missing, online rooms fall back to an in-memory store for local development only.
+
+The shared castle archive uses the same storage fallback rules: KV in production, in-memory only for local development.

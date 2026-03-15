@@ -11,7 +11,7 @@ Castle Cannon Wars is a turn-based Three.js destruction game played in a 3D aren
 - `1v1v1v1`: 4 castles, free-for-all.
 - `2v2`: 4 castles, team victory condition.
 
-The deployable build uses a local lobby that supports human-controlled turns on the same device and AI-controlled opponents.
+The deployable build uses a local lobby that supports human-controlled turns on the same device, AI-controlled opponents, a castle creation workflow, and a shared archive of public castle designs.
 
 ## Scene Layout
 
@@ -33,6 +33,21 @@ Each castle is constructed from repeated stone blocks so the whole structure can
 - Four corner towers are taller than the walls and built as stacked stone columns.
 - The central keep raises the silhouette and gives the captain a clear standing point.
 - Battlements create a readable castle top line and make height loss obvious during destruction.
+
+## Create A Castle Mode
+
+- Each side receives a fixed brick budget.
+- Players place bricks on a layered build grid before starting a duel.
+- The runtime normalizes those brick coordinates into a valid rigid-body fortress.
+- Four cannon anchors and a captain position are derived automatically from the finished silhouette.
+- Custom duels currently launch as a `1v1` with either a second human or an AI captain.
+
+## Shared Castles Archive
+
+- Built castles can be published into a shared `Castles` tab.
+- Published designs store author, name, brick count, and normalized brick coordinates.
+- Any archived design can be assigned back to Player 1 or Player 2 for a custom duel.
+- Archive data uses the same Vercel KV or in-memory fallback model as room state.
 
 ## Cannon Placement
 
@@ -93,10 +108,12 @@ Each cannon also has:
 
 ### Main Systems
 
-- `Lobby UI`: preset selection, human or AI slot assignment, start flow.
+- `Lobby UI`: preset selection, human or AI slot assignment, battle start flow, builder tab, and shared castles tab.
 - `GameApp`: scene setup, input, turn loop, AI turns, win detection.
-- `Castle Builder`: procedural placement of stones, towers, keep, cannons, captain, and ball stacks.
+- `Castle Design Helpers`: brick-budget validation, normalized build-grid storage, derived cannon anchors, and spawn placement conversion.
+- `Castle Builder`: editor workflow for custom fortress layouts before a duel starts.
 - `HUD`: active player, cannon state, charge meter, controls, event log.
+- `Castle Archive API`: publish and list shared designs through Vercel serverless endpoints.
 
 ## Deployment
 
@@ -104,4 +121,5 @@ Each cannon also has:
 - Build output produced through Vite.
 - Local hot-seat and AI battles work without a backend.
 - Online rooms use Vercel serverless APIs with KV or Redis-backed room state.
+- Shared castle publishing uses Vercel serverless APIs with the same storage abstraction.
 - The current online sync model is turn-based snapshot replication instead of realtime websocket simulation.

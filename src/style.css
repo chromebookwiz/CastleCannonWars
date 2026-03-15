@@ -133,10 +133,15 @@ h3 {
 .mode-toggle,
 .control-row,
 .preset-grid,
+.tab-strip,
+.builder-toolbar,
+.builder-actions,
+.castle-card-actions,
 .slot-list,
 .room-header,
 .room-seat-list,
-.online-actions {
+.online-actions,
+.shared-castles-list {
   display: grid;
   gap: 0.8rem;
 }
@@ -156,13 +161,45 @@ h3 {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.tab-strip {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.builder-toolbar {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+}
+
+.player-toggle,
+.layer-toggle,
+.castle-card-actions {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.player-toggle {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.layer-toggle {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.castle-card-actions {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .slot-list,
 .room-seat-list {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .control-row,
+.builder-actions,
 .online-actions {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.shared-castles-list {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
@@ -260,6 +297,7 @@ h3 {
 .overlay.is-hidden,
 .online-panel.is-hidden,
 .room-panel.is-hidden,
+.tab-panel.is-hidden,
 .action-button.is-hidden,
 .overlay-actions.is-hidden {
   display: none;
@@ -279,7 +317,10 @@ h3 {
 .slot-row,
 .room-seat,
 .room-panel,
-.field {
+.field,
+.builder-stats,
+.castle-card,
+.glass-inset {
   padding: 0.95rem 1rem;
   border-radius: 1.15rem;
   background: rgba(255, 255, 255, 0.06);
@@ -310,6 +351,69 @@ h3 {
 .room-panel {
   display: grid;
   gap: 0.9rem;
+}
+
+.lobby-card {
+  width: min(72rem, 100%);
+}
+
+.tab-panel,
+.builder-layout,
+.builder-left,
+.builder-right,
+.castle-card {
+  display: grid;
+  gap: 1rem;
+}
+
+.builder-layout {
+  grid-template-columns: minmax(18rem, 22rem) minmax(0, 1fr);
+  align-items: start;
+}
+
+.builder-grid {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 0.45rem;
+  padding: 1rem;
+  border-radius: 1.2rem;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.04));
+}
+
+.builder-cell {
+  min-height: 2.65rem;
+  border-radius: 0.85rem;
+  border: 1px solid rgba(255, 239, 208, 0.14);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 239, 208, 0.55);
+  font-size: 1rem;
+}
+
+.builder-cell.is-filled {
+  background: linear-gradient(180deg, rgba(189, 193, 199, 0.85), rgba(110, 119, 129, 0.95));
+  color: #f6f0e8;
+  border-color: rgba(255, 239, 208, 0.4);
+}
+
+.builder-cell:hover {
+  transform: translateY(-1px);
+}
+
+.builder-stats p {
+  margin-bottom: 0.35rem;
+}
+
+.builder-stats p:last-child {
+  margin-bottom: 0;
+}
+
+.castle-card {
+  align-content: space-between;
+}
+
+.castle-tab-actions {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .field {
@@ -377,7 +481,13 @@ h3 {
   .room-header,
   .online-grid,
   .online-actions,
-  .mode-toggle {
+  .mode-toggle,
+  .tab-strip,
+  .builder-toolbar,
+  .builder-actions,
+  .builder-layout,
+  .shared-castles-list,
+  .castle-card-actions {
     grid-template-columns: 1fr;
   }
 

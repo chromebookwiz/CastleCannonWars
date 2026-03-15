@@ -5,6 +5,9 @@ import type {
   LocalMatchRequest,
   OnlineRoomState,
   OnlineSession,
+  PublishCastleDesignResponse,
+  SharedCastleListResponse,
+  CastleDesign,
 } from './types'
 
 type JsonValue = Record<string, unknown>
@@ -56,4 +59,12 @@ export const commitOnlineSnapshot = async (
   requestJson<OnlineRoomState>(`/api/rooms/${session.roomCode}`, {
     method: 'POST',
     body: JSON.stringify({ action: 'commit-turn', playerToken: session.playerToken, snapshot }),
+  })
+
+export const fetchSharedCastles = async (): Promise<SharedCastleListResponse> => requestJson<SharedCastleListResponse>('/api/castles')
+
+export const publishCastleDesign = async (design: CastleDesign): Promise<PublishCastleDesignResponse> =>
+  requestJson<PublishCastleDesignResponse>('/api/castles', {
+    method: 'POST',
+    body: JSON.stringify(design),
   })
