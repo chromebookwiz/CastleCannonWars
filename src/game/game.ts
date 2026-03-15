@@ -3,7 +3,9 @@ import RAPIER from '@dimforge/rapier3d-compat'
 
 import { BattleAudio } from './audio'
 import {
+  BRICK_SPACING_XZ,
   createStarterCastleDesign,
+  designBounds,
   designCaptainAnchor,
   designCannonAnchors,
   designToPlacements,
@@ -33,6 +35,7 @@ type GameUIRefs = {
   hudHeight: HTMLElement
   hudCharge: HTMLElement
   hudAmmo: HTMLElement
+  cannonPanel: HTMLElement
   chargeFill: HTMLElement
   prevButton: HTMLButtonElement
   nextButton: HTMLButtonElement
@@ -83,15 +86,28 @@ type CannonState = {
   recoil: number
 }
 
+type CaptainState = {
+  root: THREE.Group
+  leftArm: THREE.Group
+  rightArm: THREE.Group
+  leftLeg: THREE.Group
+  rightLeg: THREE.Group
+  homeY: number
+  facing: number
+  walkCycle: number
+}
+
 type CastleState = {
   player: PlayerState
   group: THREE.Group
   stones: StonePart[]
   cannons: CannonState[]
+  captain?: CaptainState
   supportHeight: number
   alive: boolean
   origin: THREE.Vector3
   rotationY: number
+  walkBounds: { minX: number; maxX: number; minZ: number; maxZ: number }
 }
 
 type SyncBody = {
@@ -127,6 +143,8 @@ type HostedOnlineMatchRequest = {
 const MAX_POWDER = 100
 const CHARGE_TIME_MS = 2300
 const PROJECTILE_RADIUS = 0.42
+const CANNON_INTERACT_DISTANCE = 3.5
+const CAPTAIN_MOVE_SPEED = 5.5
 const clamp = THREE.MathUtils.clamp
 const degToRad = THREE.MathUtils.degToRad
 const radToDeg = THREE.MathUtils.radToDeg
@@ -170,9 +188,9 @@ export class GameApp {
   private lastActorWasAi = false
   private gameOverCommitDone = false
 
-  private cameraYaw = degToRad(36)
-  private cameraPitch = 0.74
-  private cameraDistance = 34
+  private cameraYaw = degToRad(28)
+  private cameraPitch = 0.46
+  private cameraDistance = 9.5
   private cameraTarget = new THREE.Vector3()
   private dragging = false
   private lastPointer = new THREE.Vector2()
@@ -198,8 +216,8 @@ export class GameApp {
     this.scene.fog = new THREE.Fog('#d9d0c4', 55, 120)
     this.particleSystem = new ParticleSystem(this.scene, 640)
 
-    this.camera = new THREE.PerspectiveCamera(52, 1, 0.1, 250)
-    this.camera.position.set(18, 20, 26)
+    this.camera = new THREE.PerspectiveCamera(58, 1, 0.1, 250)
+    this.camera.position.set(8, 8, 10)
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true })
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
@@ -432,7 +450,7 @@ export class GameApp {
   }
 
   private spawnCastles(): void {
-    const radius = this.players.length === 2 ? 23 : 25
+    const radius = this.players.length === 2 ? 29 : 32
     this.players.forEach((player, index) => {
       const angle = (index / this.players.length) * Math.PI * 2
       const origin = new THREE.Vector3(Math.cos(angle) * radius, 0, Math.sin(angle) * radius)
@@ -448,6 +466,13 @@ export class GameApp {
     group.rotation.y = rotationY
     this.scene.add(group)
 
+    const footprint = designBounds(design ?? DEFAULT_CASTLE_DESIGN)
+    const padding = BRICK_SPACING_XZ * 0.8
+    const walkMinX = (footprint.minX - 3.5) * BRICK_SPACING_XZ + padding
+    const walkMaxX = (footprint.maxX - 3.5) * BRICK_SPACING_XZ - padding
+    const walkMinZ = (footprint.minZ - 3.5) * BRICK_SPACING_XZ + padding
+    const walkMaxZ = (footprint.maxZ - 3.5) * BRICK_SPACING_XZ - padding
+
     const castle: CastleState = {
       player,
       group,
@@ -457,13 +482,19 @@ export class GameApp {
       alive: true,
       origin: origin.clone(),
       rotationY,
+      walkBounds: { minX: walkMinX, maxX: walkMaxX, minZ: walkMinZ, maxZ: walkMaxZ },
     }
 
     const placements = this.generateCastleBlueprint(design)
+    this.createCastleFoundation(castle, placements)
     placements.forEach(({ position, size, tint }) => {
       const worldPosition = position.clone().applyAxisAngle(WORLD_UP, rotationY).add(origin)
+      const isGrounded = position.y - size.y * 0.5 <= 0.05
       const body = this.world.createRigidBody(
-        RAPIER.RigidBodyDesc.dynamic().setTranslation(worldPosition.x, worldPosition.y, worldPosition.z).setLinearDamping(0.34).setAngularDamping(0.58),
+        (isGrounded ? RAPIER.RigidBodyDesc.fixed() : RAPIER.RigidBodyDesc.dynamic())
+          .setTranslation(worldPosition.x, worldPosition.y, worldPosition.z)
+          .setLinearDamping(0.48)
+          .setAngularDamping(0.72),
       )
       this.world.createCollider(
         RAPIER.ColliderDesc.cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5).setDensity(1.35).setFriction(0.98).setRestitution(0.01),
@@ -476,13 +507,38 @@ export class GameApp {
       this.scene.add(mesh)
 
       castle.stones.push({ body, mesh, height: size.y })
-      this.syncedBodies.push({ body, mesh })
+      if (!isGrounded) {
+        this.syncedBodies.push({ body, mesh })
+      }
     })
 
-    this.createCaptain(castle, design)
+    castle.captain = this.createCaptain(castle, design)
     castle.cannons = this.createCannons(castle, design)
     this.updateCastleHeight(castle)
     return castle
+  }
+
+  private createCastleFoundation(castle: CastleState, placements: Array<{ position: THREE.Vector3; size: THREE.Vector3; tint: string }>): void {
+    const bounds = placements.reduce(
+      (accumulator, placement) => ({
+        minX: Math.min(accumulator.minX, placement.position.x - placement.size.x * 0.5),
+        maxX: Math.max(accumulator.maxX, placement.position.x + placement.size.x * 0.5),
+        minZ: Math.min(accumulator.minZ, placement.position.z - placement.size.z * 0.5),
+        maxZ: Math.max(accumulator.maxZ, placement.position.z + placement.size.z * 0.5),
+      }),
+      { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity },
+    )
+
+    const size = new THREE.Vector3(bounds.maxX - bounds.minX + 2.2, 1.1, bounds.maxZ - bounds.minZ + 2.2)
+    const localPosition = new THREE.Vector3((bounds.minX + bounds.maxX) * 0.5, -0.56, (bounds.minZ + bounds.maxZ) * 0.5)
+    const mesh = new THREE.Mesh(this.getBoxGeometry(size), this.getStoneMaterial('#89745f'))
+    mesh.position.copy(localPosition)
+    mesh.receiveShadow = true
+    castle.group.add(mesh)
+
+    const worldPosition = localPosition.clone().applyAxisAngle(WORLD_UP, castle.rotationY).add(castle.origin)
+    const body = this.world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(worldPosition.x, worldPosition.y, worldPosition.z))
+    this.world.createCollider(RAPIER.ColliderDesc.cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5).setFriction(1.1).setRestitution(0), body)
   }
 
   private generateCastleBlueprint(design?: CastleDesign): Array<{ position: THREE.Vector3; size: THREE.Vector3; tint: string }> {
@@ -494,23 +550,64 @@ export class GameApp {
     }))
   }
 
-  private createCaptain(castle: CastleState, design?: CastleDesign): void {
+  private createCaptain(castle: CastleState, design?: CastleDesign): CaptainState {
     const captain = new THREE.Group()
-    const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.28, 0.85, 6, 12), new THREE.MeshStandardMaterial({ color: castle.player.color, roughness: 0.78 }))
-    body.castShadow = true
+    const bodyMaterial = new THREE.MeshStandardMaterial({ color: castle.player.color, roughness: 0.78 })
+    const clothMaterial = new THREE.MeshStandardMaterial({ color: '#2b2620', roughness: 0.9 })
+    const skinMaterial = new THREE.MeshStandardMaterial({ color: '#f0d1b2', roughness: 0.8 })
 
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.26, 16, 16), new THREE.MeshStandardMaterial({ color: '#f0d1b2', roughness: 0.8 }))
-    head.position.y = 0.95
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.56, 0.2), bodyMaterial)
+    torso.position.y = 0.52
+    torso.castShadow = true
+
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.18, 14, 14), skinMaterial)
+    head.position.y = 0.98
     head.castShadow = true
 
-    const plume = new THREE.Mesh(new THREE.ConeGeometry(0.15, 0.4, 8), new THREE.MeshStandardMaterial({ color: '#2f3e46', roughness: 0.5 }))
-    plume.position.y = 1.28
+    const leftArm = new THREE.Group()
+    leftArm.position.set(-0.26, 0.76, 0)
+    const leftArmMesh = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.44, 0.12), clothMaterial)
+    leftArmMesh.position.y = -0.22
+    leftArmMesh.castShadow = true
+    leftArm.add(leftArmMesh)
+
+    const rightArm = new THREE.Group()
+    rightArm.position.set(0.26, 0.76, 0)
+    const rightArmMesh = leftArmMesh.clone()
+    rightArmMesh.castShadow = true
+    rightArm.add(rightArmMesh)
+
+    const leftLeg = new THREE.Group()
+    leftLeg.position.set(-0.1, 0.28, 0)
+    const leftLegMesh = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.5, 0.13), clothMaterial)
+    leftLegMesh.position.y = -0.25
+    leftLegMesh.castShadow = true
+    leftLeg.add(leftLegMesh)
+
+    const rightLeg = new THREE.Group()
+    rightLeg.position.set(0.1, 0.28, 0)
+    const rightLegMesh = leftLegMesh.clone()
+    rightLegMesh.castShadow = true
+    rightLeg.add(rightLegMesh)
+
+    const plume = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.28, 8), new THREE.MeshStandardMaterial({ color: '#d6a23d', roughness: 0.5 }))
+    plume.position.y = 1.22
     plume.castShadow = true
 
-    captain.add(body, head, plume)
+    captain.add(torso, head, leftArm, rightArm, leftLeg, rightLeg, plume)
     const [x, y, z] = designCaptainAnchor(design ?? DEFAULT_CASTLE_DESIGN)
     captain.position.set(x, y, z)
     castle.group.add(captain)
+    return {
+      root: captain,
+      leftArm,
+      rightArm,
+      leftLeg,
+      rightLeg,
+      homeY: y,
+      facing: 0,
+      walkCycle: 0,
+    }
   }
 
   private createCannons(castle: CastleState, design?: CastleDesign): CannonState[] {
@@ -532,32 +629,32 @@ export class GameApp {
       const pitchPivot = new THREE.Group()
       yawPivot.add(pitchPivot)
 
-      const carriage = new THREE.Mesh(new THREE.BoxGeometry(1.25, 0.35, 1.25), this.wheelMaterial)
+      const carriage = new THREE.Mesh(new THREE.BoxGeometry(1.02, 0.28, 1.02), this.wheelMaterial)
       carriage.position.y = -0.18
       carriage.castShadow = true
       pitchPivot.add(carriage)
 
-      const wheelLeft = new THREE.Mesh(new THREE.TorusGeometry(0.32, 0.12, 10, 20), this.wheelMaterial)
+      const wheelLeft = new THREE.Mesh(new THREE.TorusGeometry(0.26, 0.09, 10, 18), this.wheelMaterial)
       wheelLeft.rotation.y = Math.PI / 2
-      wheelLeft.position.set(-0.48, -0.26, 0)
+      wheelLeft.position.set(-0.4, -0.22, 0)
       wheelLeft.castShadow = true
       pitchPivot.add(wheelLeft)
       const wheelRight = wheelLeft.clone()
-      wheelRight.position.x = 0.48
+      wheelRight.position.x = 0.4
       pitchPivot.add(wheelRight)
 
-      const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.34, 2.2, 18), this.barrelMaterial.clone())
+      const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.28, 1.82, 18), this.barrelMaterial.clone())
       barrel.rotation.x = Math.PI / 2
-      barrel.position.set(0, 0.2, 0.75)
+      barrel.position.set(0, 0.15, 0.62)
       barrel.castShadow = true
       pitchPivot.add(barrel)
 
       const muzzle = new THREE.Object3D()
-      muzzle.position.set(0, 0.2, 1.85)
+      muzzle.position.set(0, 0.15, 1.48)
       pitchPivot.add(muzzle)
 
-      const loadedBall = new THREE.Mesh(new THREE.SphereGeometry(0.19, 14, 14), this.ballMaterial)
-      loadedBall.position.set(0, 0.2, 0.62)
+      const loadedBall = new THREE.Mesh(new THREE.SphereGeometry(0.15, 14, 14), this.ballMaterial)
+      loadedBall.position.set(0, 0.15, 0.48)
       loadedBall.visible = false
       pitchPivot.add(loadedBall)
 
@@ -573,7 +670,7 @@ export class GameApp {
       ]
 
       stackOffsets.forEach((offset) => {
-        const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.21, 12, 12), this.ballMaterial)
+        const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.18, 12, 12), this.ballMaterial)
         mesh.position.copy(stackBase.clone().add(offset))
         mesh.castShadow = true
         mesh.receiveShadow = true
@@ -626,7 +723,7 @@ export class GameApp {
       const dy = event.clientY - this.lastPointer.y
       this.lastPointer.set(event.clientX, event.clientY)
       this.cameraYaw -= dx * 0.006
-      this.cameraPitch = clamp(this.cameraPitch + dy * 0.004, 0.32, 1.1)
+      this.cameraPitch = clamp(this.cameraPitch + dy * 0.004, 0.2, 0.95)
     })
 
     window.addEventListener('pointerup', () => {
@@ -634,7 +731,7 @@ export class GameApp {
     })
 
     this.renderer.domElement.addEventListener('wheel', (event: WheelEvent) => {
-      this.cameraDistance = clamp(this.cameraDistance + event.deltaY * 0.015, 18, 48)
+      this.cameraDistance = clamp(this.cameraDistance + event.deltaY * 0.01, 6.5, 15)
     })
 
     this.ui.prevButton.addEventListener('click', () => this.selectCannon(this.selectedCannonIndex - 1))
@@ -676,7 +773,7 @@ export class GameApp {
       }
     }
 
-    const tracked = ['KeyA', 'KeyD', 'KeyW', 'KeyS']
+    const tracked = ['KeyA', 'KeyD', 'KeyW', 'KeyS', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown']
     if (tracked.includes(event.code)) {
       if (pressed) {
         this.keysDown.add(event.code)
@@ -735,8 +832,7 @@ export class GameApp {
   }
 
   private updateCamera(delta: number): void {
-    const targetCastle = this.getCurrentPlayer()?.castle
-    const desiredTarget = targetCastle?.origin ?? new THREE.Vector3()
+    const desiredTarget = this.getCameraTargetPosition()
     this.cameraTarget.lerp(desiredTarget, 1 - Math.pow(0.0001, delta))
     this.cameraShake = Math.max(0, this.cameraShake - delta * 1.8)
 
@@ -744,34 +840,72 @@ export class GameApp {
     const shakeOffset = new THREE.Vector3((Math.random() - 0.5) * this.cameraShake, Math.random() * this.cameraShake, (Math.random() - 0.5) * this.cameraShake)
     const desiredPosition = new THREE.Vector3(
       this.cameraTarget.x + Math.sin(this.cameraYaw) * horizontal,
-      this.cameraTarget.y + Math.sin(this.cameraPitch) * this.cameraDistance + 7,
+      this.cameraTarget.y + Math.sin(this.cameraPitch) * this.cameraDistance + 1.5,
       this.cameraTarget.z + Math.cos(this.cameraYaw) * horizontal,
     ).add(shakeOffset)
 
     this.camera.position.lerp(desiredPosition, 1 - Math.pow(0.0001, delta))
-    this.camera.lookAt(this.cameraTarget.x, this.cameraTarget.y + 4.5, this.cameraTarget.z)
+    this.camera.lookAt(this.cameraTarget.x, this.cameraTarget.y + 0.8, this.cameraTarget.z)
   }
 
   private updateHumanControls(delta: number): void {
     const player = this.getCurrentPlayer()
-    if (!player || !this.canHumanControl(player)) {
-      return
-    }
-    const cannon = this.getSelectedCannon()
-    if (!cannon) {
+    const castle = player?.castle
+    const captain = castle?.captain
+    if (!player || !castle || !captain || !this.canHumanControl(player)) {
       return
     }
 
+    let moveX = 0
+    let moveZ = 0
     if (this.keysDown.has('KeyA')) {
-      cannon.yawOffset += 0.95 * delta
+      moveX -= 1
     }
     if (this.keysDown.has('KeyD')) {
-      cannon.yawOffset -= 0.95 * delta
+      moveX += 1
     }
     if (this.keysDown.has('KeyW')) {
-      cannon.pitch += 0.65 * delta
+      moveZ -= 1
     }
     if (this.keysDown.has('KeyS')) {
+      moveZ += 1
+    }
+
+    const moveLength = Math.hypot(moveX, moveZ)
+    if (moveLength > 0) {
+      moveX /= moveLength
+      moveZ /= moveLength
+      captain.root.position.x = clamp(captain.root.position.x + moveX * CAPTAIN_MOVE_SPEED * delta, castle.walkBounds.minX, castle.walkBounds.maxX)
+      captain.root.position.z = clamp(captain.root.position.z + moveZ * CAPTAIN_MOVE_SPEED * delta, castle.walkBounds.minZ, castle.walkBounds.maxZ)
+      captain.facing = Math.atan2(moveX, moveZ)
+      captain.root.rotation.y = captain.facing
+      captain.walkCycle += delta * 10
+    } else {
+      captain.walkCycle += delta * 2
+    }
+    captain.root.position.y = captain.homeY
+    this.updateCaptainPose(captain, moveLength > 0 ? 1 : 0)
+
+    const cannon = this.getNearbyCannon(player)
+    if (!cannon) {
+      this.isCharging = false
+      return
+    }
+
+    if (cannon.id !== this.selectedCannonIndex) {
+      this.selectCannon(cannon.id)
+    }
+
+    if (this.keysDown.has('ArrowLeft')) {
+      cannon.yawOffset += 0.95 * delta
+    }
+    if (this.keysDown.has('ArrowRight')) {
+      cannon.yawOffset -= 0.95 * delta
+    }
+    if (this.keysDown.has('ArrowUp')) {
+      cannon.pitch += 0.65 * delta
+    }
+    if (this.keysDown.has('ArrowDown')) {
       cannon.pitch -= 0.65 * delta
     }
 
@@ -783,6 +917,43 @@ export class GameApp {
     }
 
     this.applyCannonPose(cannon)
+  }
+
+  private updateCaptainPose(captain: CaptainState, stride: number): void {
+    const swing = Math.sin(captain.walkCycle) * 0.55 * stride
+    captain.leftArm.rotation.x = swing
+    captain.rightArm.rotation.x = -swing
+    captain.leftLeg.rotation.x = -swing
+    captain.rightLeg.rotation.x = swing
+  }
+
+  private getNearbyCannon(player?: PlayerState): CannonState | undefined {
+    const castle = player?.castle
+    const captain = castle?.captain
+    if (!castle || !captain) {
+      return undefined
+    }
+
+    let nearest: CannonState | undefined
+    let nearestDistanceSq = Infinity
+    castle.cannons.forEach((cannon) => {
+      const distanceSq = cannon.root.position.distanceToSquared(captain.root.position)
+      if (distanceSq < nearestDistanceSq) {
+        nearest = cannon
+        nearestDistanceSq = distanceSq
+      }
+    })
+
+    return nearestDistanceSq <= CANNON_INTERACT_DISTANCE * CANNON_INTERACT_DISTANCE ? nearest : undefined
+  }
+
+  private getCameraTargetPosition(): THREE.Vector3 {
+    const castle = this.getCurrentPlayer()?.castle
+    const captain = castle?.captain
+    if (captain) {
+      return captain.root.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, 1, 0))
+    }
+    return castle?.origin.clone().add(new THREE.Vector3(0, 4, 0)) ?? new THREE.Vector3()
   }
 
   private updateTurnState(now: number): void {
@@ -969,10 +1140,10 @@ export class GameApp {
     castle.stones.forEach((stone) => {
       const position = stone.body.translation()
       const local = new THREE.Vector3(position.x, position.y, position.z).sub(castle.origin).applyAxisAngle(WORLD_UP, -castle.rotationY)
-      if (Math.abs(local.x) > 9 || Math.abs(local.z) > 9) {
+      if (Math.abs(local.x) > 13 || Math.abs(local.z) > 13) {
         return
       }
-      const key = `${Math.round(local.x / 1.2)}:${Math.round(local.z / 1.2)}`
+      const key = `${Math.round(local.x / BRICK_SPACING_XZ)}:${Math.round(local.z / BRICK_SPACING_XZ)}`
       const topY = position.y + stone.height * 0.5
       const current = footprintHeights.get(key) ?? 0
       if (topY > current) {
@@ -1024,7 +1195,7 @@ export class GameApp {
 
   private beginCharge(): void {
     const player = this.getCurrentPlayer()
-    const cannon = this.getSelectedCannon()
+    const cannon = this.getNearbyCannon(player)
     if (!player || !this.canHumanControl(player) || !cannon?.loaded) {
       return
     }
@@ -1041,9 +1212,10 @@ export class GameApp {
     if (!player || !this.canHumanControl(player) || this.phase !== 'playing') {
       return
     }
-    const cannon = this.getSelectedCannon()
+    const cannon = this.getNearbyCannon(player)
     if (cannon) {
       this.loadCannon(cannon)
+      this.selectCannon(cannon.id)
     }
   }
 
@@ -1066,7 +1238,7 @@ export class GameApp {
 
   private fireSelectedCannon(force = false): void {
     const player = this.getCurrentPlayer()
-    const cannon = this.getSelectedCannon()
+    const cannon = force ? this.getSelectedCannon() : this.getNearbyCannon(player)
     if (!player || !cannon || this.phase !== 'playing') {
       return
     }
@@ -1150,9 +1322,8 @@ export class GameApp {
   }
 
   private focusCurrentCastle(force = false): void {
-    const castle = this.getCurrentPlayer()?.castle
-    if (castle && force) {
-      this.cameraTarget.copy(castle.origin)
+    if (force) {
+      this.cameraTarget.copy(this.getCameraTargetPosition())
     }
   }
 
@@ -1289,22 +1460,29 @@ export class GameApp {
 
   private updateHud(): void {
     const player = this.getCurrentPlayer()
-    const cannon = this.getSelectedCannon()
+    const activeHuman = Boolean(player && this.canHumanControl(player))
+    const nearbyCannon = activeHuman ? this.getNearbyCannon(player) : undefined
+    const cannon = nearbyCannon ?? this.getSelectedCannon()
     this.ui.hudPlayer.textContent = player ? `${player.name}${player.controller === 'ai' ? ' [AI]' : ''}` : 'No match started'
     this.ui.hudMode.textContent = this.phase === 'lobby' ? 'Lobby' : this.network.kind === 'online' ? `Online room ${this.network.session.roomCode}` : presetLabel(this.preset)
     this.ui.hudTurn.textContent = this.phase === 'lobby' ? '-' : `${this.turnNumber}`
-    this.ui.hudCannon.textContent = cannon ? `#${cannon.id + 1} | yaw ${radToDeg(cannon.yawOffset).toFixed(0)}° | pitch ${radToDeg(cannon.pitch).toFixed(0)}°` : '-'
+    this.ui.hudCannon.textContent = nearbyCannon
+      ? `#${nearbyCannon.id + 1} | yaw ${radToDeg(nearbyCannon.yawOffset).toFixed(0)}° | pitch ${radToDeg(nearbyCannon.pitch).toFixed(0)}°`
+      : this.phase === 'lobby'
+        ? '-'
+        : 'Move beside a cannon to load and fire.'
     this.ui.hudHeight.textContent = player?.castle ? `${player.castle.supportHeight.toFixed(1)}m / ${CASTLE_MIN_HEIGHT.toFixed(1)}m` : '-'
     this.ui.hudCharge.textContent = cannon ? `${Math.round(cannon.powder)}%` : '0%'
     this.ui.chargeFill.setAttribute('style', `width:${cannon ? cannon.powder : 0}%`)
     this.ui.hudAmmo.textContent = cannon ? `${cannon.ammoReserve} balls in stack${cannon.loaded ? ' + 1 loaded' : ''}` : '-'
 
-    const activeHuman = Boolean(player && this.canHumanControl(player))
-    this.ui.prevButton.disabled = !activeHuman
-    this.ui.nextButton.disabled = !activeHuman
-    this.ui.loadButton.disabled = !activeHuman
-    this.ui.fireButton.disabled = !activeHuman
-    this.ui.chargeButton.disabled = !activeHuman || !cannon?.loaded
+    const nearCannon = Boolean(activeHuman && nearbyCannon && this.phase !== 'lobby')
+    this.ui.cannonPanel.classList.toggle('is-hidden', !nearCannon)
+    this.ui.prevButton.disabled = !nearCannon
+    this.ui.nextButton.disabled = !nearCannon
+    this.ui.loadButton.disabled = !nearCannon
+    this.ui.fireButton.disabled = !nearCannon
+    this.ui.chargeButton.disabled = !nearCannon || !cannon?.loaded
   }
 
   private setMessage(message: string): void {

@@ -1,20 +1,24 @@
-@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Manrope:wght@400;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@700&family=Cormorant+Garamond:wght@400;500;600;700&display=swap');
 
 :root {
-  font-family: 'Manrope', sans-serif;
-  color: #f8f5ef;
-  background: radial-gradient(circle at top, rgba(244, 201, 93, 0.18), transparent 32%), linear-gradient(180deg, #362417 0%, #20140f 56%, #130c08 100%);
+  font-family: 'Cormorant Garamond', serif;
+  color: #f4ead8;
+  background:
+    radial-gradient(circle at top, rgba(204, 154, 76, 0.16), transparent 28%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.03) 25%, transparent 25%) 0 0 / 22px 22px,
+    linear-gradient(315deg, rgba(255, 255, 255, 0.025) 25%, transparent 25%) 0 0 / 22px 22px,
+    linear-gradient(180deg, #1e1712 0%, #120e0b 100%);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  --glass: rgba(28, 17, 12, 0.68);
-  --glass-border: rgba(255, 239, 208, 0.16);
-  --accent: #edae49;
-  --accent-strong: #f77f00;
-  --danger: #d1495b;
-  --copy: #f5ecdf;
-  --muted: #d8c4a6;
+  --glass: rgba(19, 15, 11, 0.88);
+  --glass-border: rgba(214, 180, 110, 0.26);
+  --accent: #d6a23d;
+  --accent-strong: #f0be63;
+  --danger: #a43a30;
+  --copy: #f4ead8;
+  --muted: #bea88b;
 }
 
 * {
@@ -65,8 +69,7 @@ h3 {
 .glass-panel {
   background: var(--glass);
   border: 1px solid var(--glass-border);
-  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.28);
-  backdrop-filter: blur(14px);
+  box-shadow: 0 22px 55px rgba(0, 0, 0, 0.34);
 }
 
 .topbar {
@@ -78,7 +81,7 @@ h3 {
   justify-content: space-between;
   gap: 1.5rem;
   padding: 1rem 1.2rem;
-  border-radius: 1.4rem;
+  border-radius: 0;
   pointer-events: none;
 }
 
@@ -86,8 +89,8 @@ h3 {
 .overlay-card h2,
 .hud h2,
 .room-header h3 {
-  font-family: 'Cinzel', serif;
-  letter-spacing: 0.04em;
+  font-family: 'Cinzel Decorative', serif;
+  letter-spacing: 0.06em;
 }
 
 .topbar h1 {
@@ -123,9 +126,19 @@ h3 {
   right: 1.4rem;
   width: min(24rem, calc(100vw - 2.8rem));
   padding: 1.1rem;
-  border-radius: 1.35rem;
+  border-radius: 0;
   display: grid;
   gap: 1rem;
+}
+
+.cannon-panel {
+  display: grid;
+  gap: 0.8rem;
+  padding: 0.95rem;
+  border: 1px solid rgba(214, 180, 110, 0.34);
+  border-radius: 0;
+  background: linear-gradient(180deg, rgba(39, 28, 20, 0.95), rgba(23, 17, 13, 0.95));
+  box-shadow: inset 0 0 0 1px rgba(255, 240, 214, 0.05);
 }
 
 .hud-grid,
@@ -214,7 +227,7 @@ h3 {
 .meter {
   width: 100%;
   height: 0.8rem;
-  border-radius: 999px;
+  border-radius: 0;
   overflow: hidden;
   background: rgba(255, 255, 255, 0.08);
 }
@@ -222,7 +235,6 @@ h3 {
 .meter-fill {
   height: 100%;
   width: 0;
-  border-radius: inherit;
   background: linear-gradient(90deg, #ffd166 0%, #f77f00 75%, #d62828 100%);
   transition: width 80ms linear;
 }
@@ -232,10 +244,11 @@ h3 {
 .slot-row select,
 .text-input {
   border: 1px solid rgba(255, 239, 208, 0.18);
-  background: rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.04);
   color: var(--copy);
-  border-radius: 0.95rem;
-  padding: 0.82rem 1rem;
+  border-radius: 0;
+  padding: 0.78rem 0.95rem;
+  letter-spacing: 0.04em;
   transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
 }
 
@@ -256,23 +269,25 @@ h3 {
 }
 
 .action-button--primary {
-  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
-  color: #1f120a;
-  border-color: transparent;
+  background: linear-gradient(180deg, rgba(214, 162, 61, 0.22), rgba(214, 162, 61, 0.06));
+  color: var(--accent-strong);
+  border-color: rgba(214, 180, 110, 0.42);
   font-weight: 700;
 }
 
 .action-button--danger {
-  background: linear-gradient(135deg, rgba(209, 73, 91, 0.92), rgba(137, 22, 22, 0.92));
+  background: linear-gradient(180deg, rgba(164, 58, 48, 0.24), rgba(164, 58, 48, 0.08));
+  color: #ffb7ad;
+  border-color: rgba(207, 103, 89, 0.4);
 }
 
 .action-button--charge {
-  background: linear-gradient(135deg, rgba(255, 209, 102, 0.24), rgba(247, 127, 0, 0.2));
+  background: linear-gradient(180deg, rgba(255, 209, 102, 0.18), rgba(247, 127, 0, 0.08));
 }
 
 .preset-button.is-active,
 .room-seat.is-local {
-  background: linear-gradient(135deg, rgba(237, 174, 73, 0.3), rgba(247, 127, 0, 0.24));
+  background: linear-gradient(180deg, rgba(214, 162, 61, 0.24), rgba(214, 162, 61, 0.08));
   border-color: rgba(255, 216, 127, 0.52);
 }
 
@@ -282,7 +297,7 @@ h3 {
   bottom: 1.4rem;
   max-width: min(42rem, calc(100vw - 2.8rem));
   padding: 0.95rem 1.1rem;
-  border-radius: 999px;
+  border-radius: 0;
 }
 
 .overlay {
@@ -306,9 +321,9 @@ h3 {
 .overlay-card {
   width: min(64rem, 100%);
   padding: 1.7rem;
-  border-radius: 1.7rem;
-  background: linear-gradient(180deg, rgba(35, 20, 13, 0.95), rgba(19, 12, 8, 0.96));
-  border: 1px solid rgba(255, 239, 208, 0.16);
+  border-radius: 0;
+  background: linear-gradient(180deg, rgba(27, 20, 15, 0.98), rgba(16, 11, 8, 0.98));
+  border: 1px solid rgba(214, 180, 110, 0.22);
   box-shadow: 0 40px 120px rgba(0, 0, 0, 0.45);
   display: grid;
   gap: 1.4rem;
@@ -322,8 +337,8 @@ h3 {
 .castle-card,
 .glass-inset {
   padding: 0.95rem 1rem;
-  border-radius: 1.15rem;
-  background: rgba(255, 255, 255, 0.06);
+  border-radius: 0;
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .slot-row {
@@ -376,13 +391,14 @@ h3 {
   grid-template-columns: repeat(8, minmax(0, 1fr));
   gap: 0.45rem;
   padding: 1rem;
-  border-radius: 1.2rem;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.04));
+  border-radius: 0;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02));
+  border: 1px solid rgba(214, 180, 110, 0.14);
 }
 
 .builder-cell {
   min-height: 2.65rem;
-  border-radius: 0.85rem;
+  border-radius: 0;
   border: 1px solid rgba(255, 239, 208, 0.14);
   background: rgba(255, 255, 255, 0.05);
   color: rgba(255, 239, 208, 0.55);
@@ -419,6 +435,11 @@ h3 {
 .field {
   display: grid;
   gap: 0.5rem;
+}
+
+.control-hints--compact {
+  padding-top: 0.2rem;
+  border-top: 1px solid rgba(214, 180, 110, 0.16);
 }
 
 .room-seat small {

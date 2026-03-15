@@ -3,8 +3,8 @@ import type { CastleBrick, CastleDesign } from './types'
 export const BUILD_GRID_SIZE = 8
 export const BUILD_LEVELS = 6
 export const BRICK_BUDGET = 72
-export const BRICK_SPACING_XZ = 1.18
-export const BRICK_HEIGHT = 0.72
+export const BRICK_SPACING_XZ = 1.42
+export const BRICK_HEIGHT = 0.84
 
 const clamp = (value: number, min: number, max: number): number => Math.max(min, Math.min(max, value))
 const keyOf = (brick: CastleBrick): string => `${brick.x}:${brick.y}:${brick.z}`
@@ -112,7 +112,7 @@ export const designToPlacements = (design: CastleDesign): Placement[] => {
     byLayer.set(brick.y, list)
   })
 
-  const placements: Placement[] = []
+  const segments: Array<{ start: number; end: number; z: number; y: number }> = []
 
   byLayer.forEach((layerBricks, y) => {
     const rows = new Map<number, number[]>()
@@ -128,13 +128,7 @@ export const designToPlacements = (design: CastleDesign): Placement[] => {
       let previous = xs[0]
 
       const pushRun = (runStart: number, runEnd: number) => {
-        const centerX = (gridToWorldX(runStart) + gridToWorldX(runEnd)) * 0.5
-        const width = BRICK_SPACING_XZ * (runEnd - runStart) + 1.02
-        placements.push({
-          position: [centerX, layerToWorldY(y), gridToWorldZ(z)],
-          size: [width, 0.7, 1.02],
-          tint: y >= 3 ? '#cdc7bc' : '#b9b4ad',
-        })
+        segments.push({ start: runStart, end: runEnd, z, y })
       }
 
       for (let index = 1; index <= xs.length; index += 1) {
@@ -150,8 +144,37 @@ export const designToPlacements = (design: CastleDesign): Placement[] => {
     })
   })
 
+  const merged = new Map<string, { start: number; end: number; z: number; minY: number; maxY: number }>()
+
+  segments.forEach((segment) => {
+    const key = `${segment.start}:${segment.end}:${segment.z}`
+    const existing = merged.get(key)
+    if (existing && existing.maxY + 1 === segment.y) {
+      existing.maxY = segment.y
+      return
+    }
+    if (!existing) {
+      merged.set(key, { start: segment.start, end: segment.end, z: segment.z, minY: segment.y, maxY: segment.y })
+      return
+    }
+
+    merged.set(`${key}:${segment.y}`, { start: segment.start, end: segment.end, z: segment.z, minY: segment.y, maxY: segment.y })
+  })
+
+  const placements: Placement[] = Array.from(merged.values()).map((segment) => {
+    const centerX = (gridToWorldX(segment.start) + gridToWorldX(segment.end)) * 0.5
+    const centerY = (layerToWorldY(segment.minY) + layerToWorldY(segment.maxY)) * 0.5
+    const width = BRICK_SPACING_XZ * (segment.end - segment.start) + 1.12
+    const height = BRICK_HEIGHT * (segment.maxY - segment.minY) + 0.78
+    return {
+      position: [centerX, centerY, gridToWorldZ(segment.z)],
+      size: [width, height, 1.12],
+      tint: segment.maxY >= 3 ? '#d4cec3' : '#b7b0a6',
+    }
+  })
+
   if (!placements.length) {
-    placements.push({ position: [0, 0.35, 0], size: [2.4, 0.7, 2.4], tint: '#9c7b53' })
+    placements.push({ position: [0, 0.39, 0], size: [2.7, 0.78, 2.7], tint: '#9c7b53' })
   }
 
   return placements

@@ -74,30 +74,36 @@ app.innerHTML = `
           <p id="hud-height">-</p>
         </div>
       </div>
-      <div>
-        <p class="hud-label">Powder charge</p>
-        <div class="meter"><div id="charge-fill" class="meter-fill"></div></div>
-        <p id="hud-charge">0%</p>
-      </div>
-      <div>
-        <p class="hud-label">Ammo stack</p>
-        <p id="hud-ammo">-</p>
-      </div>
-      <div class="control-row">
-        <button id="prev-cannon" class="action-button" type="button">Prev cannon</button>
-        <button id="next-cannon" class="action-button" type="button">Next cannon</button>
-      </div>
-      <div class="control-row">
-        <button id="load-cannon" class="action-button" type="button">Load ball</button>
-        <button id="fire-cannon" class="action-button action-button--danger" type="button">Fire</button>
-      </div>
-      <button id="charge-button" class="action-button action-button--charge" type="button">Hold to charge</button>
-
       <div class="control-hints">
-        <p>Aim: A / D and W / S</p>
-        <p>Charge: hold Space or button</p>
-        <p>Load: R, Fire: F, Swap cannon: Q / E</p>
+        <p>Move: W / A / S / D</p>
+        <p>Look: drag, Zoom: wheel</p>
+        <p>Cannon aim: arrow keys when beside a cannon</p>
       </div>
+
+      <section id="cannon-panel" class="cannon-panel is-hidden">
+        <div>
+          <p class="hud-label">Powder charge</p>
+          <div class="meter"><div id="charge-fill" class="meter-fill"></div></div>
+          <p id="hud-charge">0%</p>
+        </div>
+        <div>
+          <p class="hud-label">Ammo stack</p>
+          <p id="hud-ammo">-</p>
+        </div>
+        <div class="control-row">
+          <button id="prev-cannon" class="action-button" type="button">Prev cannon</button>
+          <button id="next-cannon" class="action-button" type="button">Next cannon</button>
+        </div>
+        <div class="control-row">
+          <button id="load-cannon" class="action-button" type="button">Load ball</button>
+          <button id="fire-cannon" class="action-button action-button--danger" type="button">Fire</button>
+        </div>
+        <button id="charge-button" class="action-button action-button--charge" type="button">Hold to charge</button>
+        <div class="control-hints control-hints--compact">
+          <p>Only available while your captain is next to a cannon.</p>
+          <p>Charge: hold Space or button. Load: R. Fire: F.</p>
+        </div>
+      </section>
     </aside>
 
     <section id="message-bar" class="message-bar glass-panel">Select a lobby mode to begin.</section>
@@ -173,7 +179,7 @@ app.innerHTML = `
               </div>
 
               <div class="builder-stats glass-inset">
-                <p><strong id="builder-brick-count">0</strong> / 56 bricks placed</p>
+                <p><strong id="builder-brick-count">0</strong> / ${BRICK_BUDGET} bricks placed</p>
                 <p id="builder-layer-label">Editing layer 1</p>
                 <p>Each side gets one fortress and exactly four cannons mounted automatically from the finished shape.</p>
               </div>
@@ -276,6 +282,7 @@ const ensureGame = async (): Promise<GameController> => {
     hudHeight: document.querySelector<HTMLElement>('#hud-height')!,
     hudCharge: document.querySelector<HTMLElement>('#hud-charge')!,
     hudAmmo: document.querySelector<HTMLElement>('#hud-ammo')!,
+    cannonPanel: document.querySelector<HTMLElement>('#cannon-panel')!,
     chargeFill: document.querySelector<HTMLElement>('#charge-fill')!,
     prevButton: document.querySelector<HTMLButtonElement>('#prev-cannon')!,
     nextButton: document.querySelector<HTMLButtonElement>('#next-cannon')!,
