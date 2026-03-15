@@ -68,9 +68,26 @@ const buildSeats = (preset, slots, displayName) => {
 const createToken = () => Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)
 const createRoomCode = () => Math.random().toString(36).slice(2, 6).toUpperCase()
 
+const normalizeDisplayName = (displayName) => {
+  const normalized = String(displayName ?? '').trim().slice(0, 18)
+  return normalized || 'Commander'
+}
+
 export const createRoom = async ({ preset, slots, displayName }) => {
-  const roomCode = createRoomCode()
-  const seats = buildSeats(preset, slots, displayName)
+  const safeDisplayName = normalizeDisplayName(displayName)
+  let roomCode = createRoomCode()
+  let attempts = 0
+
+  while ((await readRoom(roomCode)) && attempts < 24) {
+    roomCode = createRoomCode()
+    attempts += 1
+  }
+
+  if (await readRoom(roomCode)) {
+    throw new Error('Unable to allocate a unique room code right now.')
+  }
+
+  const seats = buildSeats(preset, slots, safeDisplayName)
   if (seats.length < 2) {
     throw new Error('At least two active seats are required.')
   }
@@ -88,7 +105,7 @@ export const createRoom = async ({ preset, slots, displayName }) => {
     snapshot: undefined,
     createdAt: Date.now(),
     updatedAt: Date.now(),
-    message: `${displayName} created room ${roomCode}.`,
+    message: `${safeDisplayName} created room ${roomCode}.`,
     playerTokens: {
       [hostSeat.playerId]: hostToken,
     },
@@ -130,13 +147,14 @@ export const joinRoom = async (roomCode, displayName) => {
     throw new Error('No open human seats remain in this room.')
   }
 
+  const safeDisplayName = normalizeDisplayName(displayName)
   const playerToken = createToken()
   seat.claimed = true
-  seat.name = displayName
+  seat.name = safeDisplayName
   room.playerTokens[seat.playerId] = playerToken
   room.updatedAt = Date.now()
   room.version += 1
-  room.message = `${displayName} joined room ${room.roomCode}.`
+  room.message = `${safeDisplayName} joined room ${room.roomCode}.`
   await writeRoom(room)
 
   return {

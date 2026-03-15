@@ -154,7 +154,8 @@ export class GameApp {
 
   private currentPlayerIndex = 0
   private selectedCannonIndex = 0
-  private settleUntil = 0
+  private settleMinUntil = 0
+  private settleMaxUntil = 0
   private turnNumber = 1
   private isCharging = false
   private chargeStart = 0
@@ -278,6 +279,8 @@ export class GameApp {
       }
 
       const castle = this.createCastle(player, new THREE.Vector3(...castleSnapshot.origin), castleSnapshot.rotationY)
+      player.castle = castle
+      this.castles.push(castle)
       castle.alive = castleSnapshot.alive
       castle.supportHeight = castleSnapshot.supportHeight
       player.alive = castleSnapshot.alive
@@ -368,6 +371,8 @@ export class GameApp {
     this.syncedBodies = []
     this.particles = []
     this.isCharging = false
+    this.settleMinUntil = 0
+    this.settleMaxUntil = 0
   }
 
   private buildEnvironment(): void {
@@ -833,10 +838,13 @@ export class GameApp {
   }
 
   private updateTurnState(now: number): void {
-    if (this.phase === 'settling' && now >= this.settleUntil) {
-      this.advanceTurn()
-      if (this.shouldCommitLastAction()) {
-        this.commitQueued = true
+    if (this.phase === 'settling') {
+      const shouldAdvance = now >= this.settleMaxUntil || (now >= this.settleMinUntil && this.measurePhysicsMotion() < 0.28)
+      if (shouldAdvance) {
+        this.advanceTurn()
+        if (this.shouldCommitLastAction()) {
+          this.commitQueued = true
+        }
       }
     }
 
@@ -953,6 +961,37 @@ export class GameApp {
       }
       return true
     })
+  }
+
+  private measurePhysicsMotion(): number {
+    let maxMotion = 0
+
+    this.projectiles.forEach((projectile) => {
+      const velocity = projectile.body.linvel()
+      const speed = Math.sqrt(velocity.x * velocity.x + velocity.y * velocity.y + velocity.z * velocity.z)
+      if (speed > maxMotion) {
+        maxMotion = speed
+      }
+    })
+
+    this.castles.forEach((castle) => {
+      if (!castle.alive) {
+        return
+      }
+
+      castle.stones.forEach((stone) => {
+        const velocity = stone.body.linvel()
+        const angular = stone.body.angvel()
+        const speed = Math.sqrt(velocity.x * velocity.x + velocity.y * velocity.y + velocity.z * velocity.z)
+        const spin = Math.sqrt(angular.x * angular.x + angular.y * angular.y + angular.z * angular.z)
+        const motion = Math.max(speed, spin * 0.5)
+        if (motion > maxMotion) {
+          maxMotion = motion
+        }
+      })
+    })
+
+    return maxMotion
   }
 
   private updateParticles(delta: number): void {
@@ -1135,7 +1174,9 @@ export class GameApp {
     this.applyCannonPose(cannon)
     this.isCharging = false
     this.phase = 'settling'
-    this.settleUntil = performance.now() + 4200
+    const settleStart = performance.now()
+    this.settleMinUntil = settleStart + 1800
+    this.settleMaxUntil = settleStart + 6200
     this.lastActorId = player.id
     this.lastActorWasAi = player.controller === 'ai'
     this.cameraShake = Math.min(0.6, this.cameraShake + 0.34)

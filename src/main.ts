@@ -1,6 +1,5 @@
 import './style.css'
 import { defaultSlotsForPreset, expectedSlotsForPreset, presetLabel } from './game/config'
-import { GameApp } from './game/game'
 import { commitOnlineSnapshot, createOnlineRoom, fetchOnlineRoom, joinOnlineRoom, startOnlineBattle } from './game/network'
 import type { GameSnapshot, MatchPreset, OnlineRoomState, OnlineSession, SlotOption } from './game/types'
 
@@ -154,6 +153,24 @@ let currentRoom: OnlineRoomState | null = null
 let appliedRoomVersion = 0
 let roomPollHandle = 0
 
+type GameController = {
+  initialize(): Promise<void>
+  startLocalMatch(request: { preset: MatchPreset; slots: SlotOption[] }): Promise<boolean>
+  startHostedOnlineMatch(request: {
+    preset: MatchPreset
+    seats: OnlineRoomState['seats']
+    session: OnlineSession
+    commitSnapshot: (snapshot: GameSnapshot) => Promise<void>
+  }): Promise<GameSnapshot | null>
+  applyOnlineSnapshot(
+    snapshot: GameSnapshot,
+    session: OnlineSession,
+    commitSnapshot: (snapshot: GameSnapshot) => Promise<void>,
+  ): Promise<void>
+}
+
+let game: GameController | null = null
+
 const renderSlots = (preset: MatchPreset) => {
   const defaults = defaultSlotsForPreset(preset)
   const expected = expectedSlotsForPreset(preset)
@@ -205,7 +222,7 @@ const renderRoomPanel = (room: OnlineRoomState | null) => {
       </div>
       <div>
         <p class="hud-label">Status</p>
-        <p>${room.phase === 'lobby' ? 'Awaiting start' : room.phase === 'playing' ? 'Battle live' : 'Battle complete'}</p>
+        <p>${room.phase === 'lobby' ? 'Awaiting start' : room.phase === 'game-over' ? 'Battle complete' : 'Battle live'}</p>
       </div>
       <div>
         <p class="hud-label">Preset</p>
@@ -230,26 +247,38 @@ const renderRoomPanel = (room: OnlineRoomState | null) => {
   startOnlineButton.classList.toggle('is-hidden', !(onlineSession?.isHost && room.phase === 'lobby'))
 }
 
-const game = new GameApp({
-  sceneRoot: document.querySelector<HTMLDivElement>('#scene-root')!,
-  messageBar,
-  hudPlayer: document.querySelector<HTMLElement>('#hud-player')!,
-  hudMode: document.querySelector<HTMLElement>('#hud-mode')!,
-  hudTurn: document.querySelector<HTMLElement>('#hud-turn')!,
-  hudCannon: document.querySelector<HTMLElement>('#hud-cannon')!,
-  hudHeight: document.querySelector<HTMLElement>('#hud-height')!,
-  hudCharge: document.querySelector<HTMLElement>('#hud-charge')!,
-  hudAmmo: document.querySelector<HTMLElement>('#hud-ammo')!,
-  chargeFill: document.querySelector<HTMLElement>('#charge-fill')!,
-  prevButton: document.querySelector<HTMLButtonElement>('#prev-cannon')!,
-  nextButton: document.querySelector<HTMLButtonElement>('#next-cannon')!,
-  loadButton: document.querySelector<HTMLButtonElement>('#load-cannon')!,
-  fireButton: document.querySelector<HTMLButtonElement>('#fire-cannon')!,
-  chargeButton: document.querySelector<HTMLButtonElement>('#charge-button')!,
-  winnerOverlay: document.querySelector<HTMLElement>('#winner-overlay')!,
-  winnerTitle: document.querySelector<HTMLElement>('#winner-title')!,
-  winnerCopy: document.querySelector<HTMLElement>('#winner-copy')!,
-})
+const ensureGame = async (): Promise<GameController> => {
+  if (game) {
+    return game
+  }
+
+  messageBar.textContent = 'Loading battlefield engine...'
+  const { GameApp } = await import('./game/game')
+  const instance = new GameApp({
+    sceneRoot: document.querySelector<HTMLDivElement>('#scene-root')!,
+    messageBar,
+    hudPlayer: document.querySelector<HTMLElement>('#hud-player')!,
+    hudMode: document.querySelector<HTMLElement>('#hud-mode')!,
+    hudTurn: document.querySelector<HTMLElement>('#hud-turn')!,
+    hudCannon: document.querySelector<HTMLElement>('#hud-cannon')!,
+    hudHeight: document.querySelector<HTMLElement>('#hud-height')!,
+    hudCharge: document.querySelector<HTMLElement>('#hud-charge')!,
+    hudAmmo: document.querySelector<HTMLElement>('#hud-ammo')!,
+    chargeFill: document.querySelector<HTMLElement>('#charge-fill')!,
+    prevButton: document.querySelector<HTMLButtonElement>('#prev-cannon')!,
+    nextButton: document.querySelector<HTMLButtonElement>('#next-cannon')!,
+    loadButton: document.querySelector<HTMLButtonElement>('#load-cannon')!,
+    fireButton: document.querySelector<HTMLButtonElement>('#fire-cannon')!,
+    chargeButton: document.querySelector<HTMLButtonElement>('#charge-button')!,
+    winnerOverlay: document.querySelector<HTMLElement>('#winner-overlay')!,
+    winnerTitle: document.querySelector<HTMLElement>('#winner-title')!,
+    winnerCopy: document.querySelector<HTMLElement>('#winner-copy')!,
+  })
+  await instance.initialize()
+  game = instance
+  messageBar.textContent = 'Battlefield engine ready.'
+  return instance
+}
 
 const commitSnapshot = async (snapshot: GameSnapshot) => {
   if (!onlineSession) {
@@ -264,7 +293,8 @@ const applyRoomSnapshot = async (room: OnlineRoomState) => {
   if (!onlineSession || !room.snapshot || room.version === appliedRoomVersion) {
     return
   }
-  await game.applyOnlineSnapshot(room.snapshot, onlineSession, commitSnapshot)
+  const controller = await ensureGame()
+  await controller.applyOnlineSnapshot(room.snapshot, onlineSession, commitSnapshot)
   appliedRoomVersion = room.version
   if (room.phase !== 'lobby') {
     lobbyOverlay.classList.add('is-hidden')
@@ -307,7 +337,8 @@ modeButtons.forEach((button) => {
 })
 
 document.querySelector<HTMLButtonElement>('#start-match')!.addEventListener('click', async () => {
-  const ok = await game.startLocalMatch({ preset: selectedPreset, slots: readSlots() })
+  const controller = await ensureGame()
+  const ok = await controller.startLocalMatch({ preset: selectedPreset, slots: readSlots() })
   if (ok) {
     lobbyOverlay.classList.add('is-hidden')
   }
@@ -345,7 +376,8 @@ startOnlineButton.addEventListener('click', async () => {
   if (!onlineSession || !currentRoom) {
     return
   }
-  const snapshot = await game.startHostedOnlineMatch({ preset: currentRoom.preset, seats: currentRoom.seats, session: onlineSession, commitSnapshot })
+  const controller = await ensureGame()
+  const snapshot = await controller.startHostedOnlineMatch({ preset: currentRoom.preset, seats: currentRoom.seats, session: onlineSession, commitSnapshot })
   if (!snapshot) {
     return
   }
@@ -358,5 +390,3 @@ startOnlineButton.addEventListener('click', async () => {
 document.querySelector<HTMLButtonElement>('#restart-match')!.addEventListener('click', () => {
   window.location.reload()
 })
-
-void game.initialize()
