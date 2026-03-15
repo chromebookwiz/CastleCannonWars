@@ -1,0 +1,24 @@
+{
+  "name": "castlecannonwars",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:vercel": "vercel dev",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "vercel-build": "npm run build"
+  },
+  "devDependencies": {
+    "@types/three": "^0.183.1",
+    "typescript": "~5.9.3",
+    "vercel": "^50.32.5",
+    "vite": "^8.0.0"
+  },
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.19.3",
+    "@vercel/kv": "^3.0.0",
+    "three": "^0.183.2"
+  }
+}
