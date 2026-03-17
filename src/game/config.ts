@@ -2,7 +2,9 @@ import type { MatchParticipant, MatchPreset, OnlineSeat, SlotOption } from './ty
 
 export const PLAYER_COLORS = ['#d1495b', '#edae49', '#00798c', '#30638e']
 export const TEAM_LABELS = ['Red Team', 'Blue Team']
-export const CASTLE_MIN_HEIGHT = 5.2
+export const CASTLE_MIN_COLLAPSE_HEIGHT = 2.6
+export const CASTLE_COLLAPSE_HEIGHT_RATIO = 0.58
+export const CASTLE_COLLAPSE_COLUMN_RATIO = 0.24
 
 export const presetLabel = (preset: MatchPreset): string => {
   if (preset === 'duel') {

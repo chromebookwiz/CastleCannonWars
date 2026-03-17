@@ -27,7 +27,7 @@ The deployable build uses a local lobby that supports human-controlled turns on 
 
 ## Castle Blueprint
 
-Each castle is constructed from repeated stone blocks so the whole structure can collapse under physics.
+Each castle is constructed from repeated stone blocks as individual rigid bodies so the whole structure can collapse under physics.
 
 - Outer walls form the main square defensive ring.
 - Four corner towers are taller than the walls and built as stacked stone columns.
@@ -75,8 +75,8 @@ Each cannon also has:
 
 ## Win And Elimination Rules
 
-- A castle is eliminated when its standing height drops below the configured threshold.
-- Standing height is measured from the highest surviving cluster of stones rather than a single stray block.
+- A castle is eliminated when its dominant surviving support cluster drops below its spawn-derived collapse threshold or loses too much footprint coverage.
+- Standing height is measured from the strongest surviving cluster of stones rather than a single stray block or isolated tower remnant.
 - Free-for-all matches end when only one player remains.
 - Team matches end when only one team still has any standing castle.
 
@@ -103,7 +103,7 @@ Each cannon also has:
 ### Physics
 
 - Rapier 3D for rigid bodies and projectile collisions.
-- Individual rigid bodies for stone blocks.
+- Individual rigid bodies for stone blocks with modest damping so fresh castles settle without self-destructing.
 - Dynamic cannonballs fired as physics projectiles.
 
 ### Main Systems

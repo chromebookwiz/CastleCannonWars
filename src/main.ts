@@ -17,7 +17,7 @@ import {
   publishCastleDesign,
   startOnlineBattle,
 } from './game/network'
-import type { CastleDesign, GameSnapshot, MatchPreset, OnlineRoomState, OnlineSession, SharedCastleDesign, SlotOption } from './game/types'
+import type { CastleBrick, CastleDesign, GameSnapshot, MatchPreset, OnlineRoomState, OnlineSession, SharedCastleDesign, SlotOption } from './game/types'
 
 type GameController = {
   initialize(): Promise<void>
@@ -620,10 +620,74 @@ document.querySelector<HTMLButtonElement>('#builder-publish')!.addEventListener(
   setTab('castles')
 })
 
+const validateBuilderDesign = (design: CastleDesign): { ok: boolean; message?: string } => {
+  const normalized = normalizeCastleDesign(design)
+  if (!normalized.bricks.length) {
+    return { ok: false, message: 'Place at least one brick before starting a duel.' }
+  }
+
+  const groundBricks = normalized.bricks.filter((brick) => brick.y === 0)
+  if (groundBricks.length < 8) {
+    return { ok: false, message: 'A stable fortress needs a wider ground footprint (at least 8 bricks at ground level).' }
+  }
+
+  const brickMap = new Map<string, CastleBrick>()
+  normalized.bricks.forEach((brick) => brickMap.set(`${brick.x}:${brick.y}:${brick.z}`, brick))
+
+  const neighbors = (brick: CastleBrick): CastleBrick[] => {
+    const deltas = [
+      [1, 0, 0],
+      [-1, 0, 0],
+      [0, 1, 0],
+      [0, -1, 0],
+      [0, 0, 1],
+      [0, 0, -1],
+    ] as const
+    return deltas
+      .map(([dx, dy, dz]) => brickMap.get(`${brick.x + dx}:${brick.y + dy}:${brick.z + dz}`))
+      .filter(Boolean) as CastleBrick[]
+  }
+
+  const visited = new Set<string>()
+  const queue: CastleBrick[] = []
+  groundBricks.forEach((brick) => {
+    const key = `${brick.x}:${brick.y}:${brick.z}`
+    visited.add(key)
+    queue.push(brick)
+  })
+
+  while (queue.length) {
+    const brick = queue.pop()!
+    neighbors(brick).forEach((neighbor) => {
+      const key = `${neighbor.x}:${neighbor.y}:${neighbor.z}`
+      if (!visited.has(key)) {
+        visited.add(key)
+        queue.push(neighbor)
+      }
+    })
+  }
+
+  if (visited.size !== normalized.bricks.length) {
+    return {
+      ok: false,
+      message: 'Castle must be a single connected structure from the ground up. Remove floating or isolated bricks.',
+    }
+  }
+
+  return { ok: true }
+}
+
 document.querySelector<HTMLButtonElement>('#builder-start')!.addEventListener('click', async () => {
   const controller = await ensureGame()
   builderDesigns[0] = normalizeCastleDesign({ ...builderDesigns[0], name: builderDesigns[0].name || 'North Keep', author: displayNameInput.value.trim() || 'Commander' })
   builderDesigns[1] = normalizeCastleDesign({ ...builderDesigns[1], name: builderDesigns[1].name || 'South Bastion', author: builderDesigns[1].author || 'Commander' })
+
+  const validation = validateBuilderDesign(builderDesigns[0])
+  if (!validation.ok) {
+    messageBar.textContent = validation.message ?? 'Invalid custom castle design.'
+    return
+  }
+
   const ok = await controller.startLocalMatch({
     preset: 'duel',
     slots: ['human', builderOpponentSelect.value as SlotOption, 'closed', 'closed'],

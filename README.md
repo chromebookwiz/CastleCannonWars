@@ -4,9 +4,9 @@ Three.js + Rapier turn-based destruction game with local skirmishes, AI captains
 
 ## Features
 
-- Physics-based 3D stone castles with battlements, towers, keep blocks, and manual cannon crews.
+- Physics-based 3D stone castles built from individual near-touching blocks with battlements, towers, keep blocks, and manual cannon crews.
 - Match presets: `1v1`, `1v1v1`, `1v1v1v1`, and `2v2`.
-- Manual cannonball loading, powder charge control, aiming, recoil, smoke, sparks, and AI turns.
+- Manual cannonball loading, powder charge control, aiming, recoil, smoke, sparks, AI turns, and collapse checks based on the dominant surviving support cluster.
 - Local hot-seat play or online hosted rooms using Vercel serverless APIs.
 - Create A Castle mode with a fixed brick budget and four auto-mounted cannons per fortress.
 - Shared Castles archive backed by Vercel APIs so published designs can be reused for custom duels.

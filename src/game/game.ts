@@ -3,6 +3,7 @@ import RAPIER from '@dimforge/rapier3d-compat'
 
 import { BattleAudio } from './audio'
 import {
+  BUILD_GRID_SIZE,
   BRICK_SPACING_XZ,
   createStarterCastleDesign,
   designBounds,
@@ -10,7 +11,15 @@ import {
   designCannonAnchors,
   designToPlacements,
 } from './castle-designs'
-import { buildParticipantsFromSeats, buildParticipantsFromSlots, CASTLE_MIN_HEIGHT, TEAM_LABELS, presetLabel } from './config'
+import {
+  buildParticipantsFromSeats,
+  buildParticipantsFromSlots,
+  CASTLE_COLLAPSE_COLUMN_RATIO,
+  CASTLE_COLLAPSE_HEIGHT_RATIO,
+  CASTLE_MIN_COLLAPSE_HEIGHT,
+  TEAM_LABELS,
+  presetLabel,
+} from './config'
 import { ParticleSystem } from './particle-system'
 import type {
   CastleDesign,
@@ -104,10 +113,18 @@ type CastleState = {
   cannons: CannonState[]
   captain?: CaptainState
   supportHeight: number
+  collapseHeight: number
+  minimumSupportColumns: number
   alive: boolean
   origin: THREE.Vector3
   rotationY: number
+  spawnProtectionUntil: number
   walkBounds: { minX: number; maxX: number; minZ: number; maxZ: number }
+}
+
+type CastleSupportProfile = {
+  averageHeight: number
+  columnCount: number
 }
 
 type SyncBody = {
@@ -145,6 +162,13 @@ const CHARGE_TIME_MS = 2300
 const PROJECTILE_RADIUS = 0.42
 const CANNON_INTERACT_DISTANCE = 3.5
 const CAPTAIN_MOVE_SPEED = 5.5
+const CASTLE_SPAWN_PROTECTION_MS = 2200
+const SUPPORT_CLUSTER_NEIGHBORS: Array<[number, number]> = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+]
 const clamp = THREE.MathUtils.clamp
 const degToRad = THREE.MathUtils.degToRad
 const radToDeg = THREE.MathUtils.radToDeg
@@ -479,9 +503,12 @@ export class GameApp {
       stones: [],
       cannons: [],
       supportHeight: 0,
+      collapseHeight: CASTLE_MIN_COLLAPSE_HEIGHT,
+      minimumSupportColumns: 1,
       alive: true,
       origin: origin.clone(),
       rotationY,
+      spawnProtectionUntil: performance.now() + CASTLE_SPAWN_PROTECTION_MS,
       walkBounds: { minX: walkMinX, maxX: walkMaxX, minZ: walkMinZ, maxZ: walkMaxZ },
     }
 
@@ -493,11 +520,11 @@ export class GameApp {
       const body = this.world.createRigidBody(
         (isGrounded ? RAPIER.RigidBodyDesc.fixed() : RAPIER.RigidBodyDesc.dynamic())
           .setTranslation(worldPosition.x, worldPosition.y, worldPosition.z)
-          .setLinearDamping(0.48)
-          .setAngularDamping(0.72),
+          .setLinearDamping(0.72)
+          .setAngularDamping(1.18),
       )
       this.world.createCollider(
-        RAPIER.ColliderDesc.cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5).setDensity(1.35).setFriction(0.98).setRestitution(0.01),
+        RAPIER.ColliderDesc.cuboid(size.x * 0.5, size.y * 0.5, size.z * 0.5).setDensity(1.12).setFriction(1.05).setRestitution(0.01),
         body,
       )
 
@@ -514,7 +541,9 @@ export class GameApp {
 
     castle.captain = this.createCaptain(castle, design)
     castle.cannons = this.createCannons(castle, design)
-    this.updateCastleHeight(castle)
+    const initialSupport = this.updateCastleHeight(castle)
+    castle.collapseHeight = Math.max(CASTLE_MIN_COLLAPSE_HEIGHT, initialSupport.averageHeight * CASTLE_COLLAPSE_HEIGHT_RATIO)
+    castle.minimumSupportColumns = Math.max(1, Math.ceil(initialSupport.columnCount * CASTLE_COLLAPSE_COLUMN_RATIO))
     return castle
   }
 
@@ -1118,23 +1147,37 @@ export class GameApp {
   }
 
   private updateCastleHeights(): void {
+    const now = performance.now()
+
     this.castles.forEach((castle) => {
       if (!castle.alive) {
         return
       }
 
-      this.updateCastleHeight(castle)
-      if (castle.supportHeight < CASTLE_MIN_HEIGHT) {
+      const support = this.updateCastleHeight(castle)
+      if (now < castle.spawnProtectionUntil) {
+        return
+      }
+
+      const lostHeight = support.averageHeight < castle.collapseHeight
+      const lostFooting = support.columnCount < castle.minimumSupportColumns
+      if (lostHeight || lostFooting) {
         castle.alive = false
         castle.player.alive = false
         this.dimCastle(castle)
         this.spawnParticleBurst(castle.origin.clone().add(new THREE.Vector3(0, 4, 0)), { count: 20, color: '#cfc9c1', scale: 0.22, life: 1.3, speed: 3, gravity: 2.2 })
-        this.setMessage(`${castle.player.name} has been eliminated. Their castle dropped below the survival height.`)
+        this.setMessage(`${castle.player.name} has been eliminated. Their fortress lost its main support cluster.`)
       }
     })
   }
 
-  private updateCastleHeight(castle: CastleState): void {
+  private updateCastleHeight(castle: CastleState): CastleSupportProfile {
+    const support = this.measureCastleSupport(castle)
+    castle.supportHeight = support.averageHeight
+    return support
+  }
+
+  private measureCastleSupport(castle: CastleState): CastleSupportProfile {
     const footprintHeights = new Map<string, number>()
 
     castle.stones.forEach((stone) => {
@@ -1143,7 +1186,9 @@ export class GameApp {
       if (Math.abs(local.x) > 13 || Math.abs(local.z) > 13) {
         return
       }
-      const key = `${Math.round(local.x / BRICK_SPACING_XZ)}:${Math.round(local.z / BRICK_SPACING_XZ)}`
+      const gridX = Math.round(local.x / BRICK_SPACING_XZ + (BUILD_GRID_SIZE - 1) * 0.5)
+      const gridZ = Math.round(local.z / BRICK_SPACING_XZ + (BUILD_GRID_SIZE - 1) * 0.5)
+      const key = `${gridX}:${gridZ}`
       const topY = position.y + stone.height * 0.5
       const current = footprintHeights.get(key) ?? 0
       if (topY > current) {
@@ -1151,12 +1196,52 @@ export class GameApp {
       }
     })
 
-    const heights = Array.from(footprintHeights.values()).sort((left, right) => right - left)
-    const sampleSize = Math.max(6, Math.min(12, Math.ceil(heights.length * 0.35)))
-    const sample = heights.slice(0, sampleSize)
-    const average = sample.length ? sample.reduce((sum, value) => sum + value, 0) / sample.length : 0
-    const coveragePenalty = heights.length < 10 ? (10 - heights.length) * 0.2 : 0
-    castle.supportHeight = Math.max(0, average - coveragePenalty)
+    if (!footprintHeights.size) {
+      return { averageHeight: 0, columnCount: 0 }
+    }
+
+    const visited = new Set<string>()
+    let best: CastleSupportProfile = { averageHeight: 0, columnCount: 0 }
+    let bestScore = -Infinity
+
+    footprintHeights.forEach((_, startKey) => {
+      if (visited.has(startKey)) {
+        return
+      }
+
+      const queue = [startKey]
+      const heights: number[] = []
+      visited.add(startKey)
+
+      while (queue.length) {
+        const key = queue.pop()!
+        const height = footprintHeights.get(key)
+        if (height !== undefined) {
+          heights.push(height)
+        }
+
+        const [gridX, gridZ] = key.split(':').map(Number)
+        SUPPORT_CLUSTER_NEIGHBORS.forEach(([dx, dz]) => {
+          const neighborKey = `${gridX + dx}:${gridZ + dz}`
+          if (!visited.has(neighborKey) && footprintHeights.has(neighborKey)) {
+            visited.add(neighborKey)
+            queue.push(neighborKey)
+          }
+        })
+      }
+
+      heights.sort((left, right) => right - left)
+      const sampleSize = Math.max(1, Math.ceil(heights.length * 0.6))
+      const averageHeight = heights.slice(0, sampleSize).reduce((sum, value) => sum + value, 0) / sampleSize
+      const score = averageHeight + Math.min(heights.length, 10) * 0.22
+
+      if (score > bestScore) {
+        bestScore = score
+        best = { averageHeight, columnCount: heights.length }
+      }
+    })
+
+    return best
   }
 
   private checkVictory(): void {
@@ -1471,7 +1556,7 @@ export class GameApp {
       : this.phase === 'lobby'
         ? '-'
         : 'Move beside a cannon to load and fire.'
-    this.ui.hudHeight.textContent = player?.castle ? `${player.castle.supportHeight.toFixed(1)}m / ${CASTLE_MIN_HEIGHT.toFixed(1)}m` : '-'
+    this.ui.hudHeight.textContent = player?.castle ? `${player.castle.supportHeight.toFixed(1)}m / ${player.castle.collapseHeight.toFixed(1)}m` : '-'
     this.ui.hudCharge.textContent = cannon ? `${Math.round(cannon.powder)}%` : '0%'
     this.ui.chargeFill.setAttribute('style', `width:${cannon ? cannon.powder : 0}%`)
     this.ui.hudAmmo.textContent = cannon ? `${cannon.ammoReserve} balls in stack${cannon.loaded ? ' + 1 loaded' : ''}` : '-'

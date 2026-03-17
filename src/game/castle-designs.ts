@@ -5,6 +5,8 @@ export const BUILD_LEVELS = 6
 export const BRICK_BUDGET = 72
 export const BRICK_SPACING_XZ = 1.42
 export const BRICK_HEIGHT = 0.84
+const BRICK_SIZE_XZ = 1.36
+const BRICK_SIZE_Y = 0.82
 
 const clamp = (value: number, min: number, max: number): number => Math.max(min, Math.min(max, value))
 const keyOf = (brick: CastleBrick): string => `${brick.x}:${brick.y}:${brick.z}`
@@ -39,35 +41,38 @@ export const createStarterCastleDesign = (name: string, author = 'Commander'): C
   const bricks: CastleBrick[] = []
   const add = (x: number, y: number, z: number) => bricks.push({ x, y, z })
 
-  for (let x = 1; x <= 6; x += 1) {
-    add(x, 0, 1)
-    add(x, 0, 6)
+  for (let y = 0; y <= 1; y += 1) {
+    for (let x = 1; x <= 6; x += 1) {
+      add(x, y, 1)
+      add(x, y, 6)
+    }
+    for (let z = 2; z <= 5; z += 1) {
+      add(1, y, z)
+      add(6, y, z)
+    }
   }
-  for (let z = 2; z <= 5; z += 1) {
-    add(1, 0, z)
-    add(6, 0, z)
-  }
-  for (let x = 2; x <= 5; x += 1) {
-    add(x, 1, 1)
-    add(x, 1, 6)
-  }
-  for (let z = 2; z <= 5; z += 1) {
-    add(1, 1, z)
-    add(6, 1, z)
-  }
-  ;[
+
+  const extraBricks: Array<[number, number, number]> = [
     [1, 2, 1],
     [6, 2, 1],
     [1, 2, 6],
     [6, 2, 6],
-    [1, 3, 1],
-    [6, 3, 1],
-    [1, 3, 6],
-    [6, 3, 6],
+    [3, 2, 1],
+    [4, 2, 1],
+    [3, 2, 6],
+    [4, 2, 6],
     [3, 2, 3],
     [4, 2, 3],
     [3, 2, 4],
     [4, 2, 4],
+    [3, 2, 2],
+    [4, 2, 2],
+    [3, 2, 5],
+    [4, 2, 5],
+    [1, 3, 1],
+    [6, 3, 1],
+    [1, 3, 6],
+    [6, 3, 6],
     [3, 3, 3],
     [4, 3, 3],
     [3, 3, 4],
@@ -76,7 +81,13 @@ export const createStarterCastleDesign = (name: string, author = 'Commander'): C
     [4, 4, 3],
     [3, 4, 4],
     [4, 4, 4],
-  ].forEach(([x, y, z]) => add(x, y, z))
+    [2, 4, 3],
+    [5, 4, 3],
+    [3, 4, 2],
+    [4, 4, 2],
+  ]
+
+  extraBricks.forEach(([x, y, z]) => add(x, y, z))
 
   return normalizeCastleDesign({
     id: `starter-${name.toLowerCase().replace(/\s+/g, '-')}`,
@@ -105,76 +116,21 @@ type Placement = {
 
 export const designToPlacements = (design: CastleDesign): Placement[] => {
   const normalized = normalizeCastleDesign(design)
-  const byLayer = new Map<number, CastleBrick[]>()
-  normalized.bricks.forEach((brick) => {
-    const list = byLayer.get(brick.y) ?? []
-    list.push(brick)
-    byLayer.set(brick.y, list)
-  })
+  const occupied = new Set(normalized.bricks.map((brick) => keyOf(brick)))
 
-  const segments: Array<{ start: number; end: number; z: number; y: number }> = []
+  const placements: Placement[] = normalized.bricks.map((brick) => {
+    const hasCap = occupied.has(`${brick.x}:${brick.y + 1}:${brick.z}`)
+    const tint = !hasCap ? '#d7d0c4' : brick.y === 0 ? '#a39483' : brick.y >= 3 ? '#c8c0b5' : '#b6aea2'
 
-  byLayer.forEach((layerBricks, y) => {
-    const rows = new Map<number, number[]>()
-    layerBricks.forEach((brick) => {
-      const row = rows.get(brick.z) ?? []
-      row.push(brick.x)
-      rows.set(brick.z, row)
-    })
-
-    rows.forEach((xs, z) => {
-      xs.sort((left, right) => left - right)
-      let start = xs[0]
-      let previous = xs[0]
-
-      const pushRun = (runStart: number, runEnd: number) => {
-        segments.push({ start: runStart, end: runEnd, z, y })
-      }
-
-      for (let index = 1; index <= xs.length; index += 1) {
-        const value = xs[index]
-        if (value === previous + 1) {
-          previous = value
-          continue
-        }
-        pushRun(start, previous)
-        start = value
-        previous = value
-      }
-    })
-  })
-
-  const merged = new Map<string, { start: number; end: number; z: number; minY: number; maxY: number }>()
-
-  segments.forEach((segment) => {
-    const key = `${segment.start}:${segment.end}:${segment.z}`
-    const existing = merged.get(key)
-    if (existing && existing.maxY + 1 === segment.y) {
-      existing.maxY = segment.y
-      return
-    }
-    if (!existing) {
-      merged.set(key, { start: segment.start, end: segment.end, z: segment.z, minY: segment.y, maxY: segment.y })
-      return
-    }
-
-    merged.set(`${key}:${segment.y}`, { start: segment.start, end: segment.end, z: segment.z, minY: segment.y, maxY: segment.y })
-  })
-
-  const placements: Placement[] = Array.from(merged.values()).map((segment) => {
-    const centerX = (gridToWorldX(segment.start) + gridToWorldX(segment.end)) * 0.5
-    const centerY = (layerToWorldY(segment.minY) + layerToWorldY(segment.maxY)) * 0.5
-    const width = BRICK_SPACING_XZ * (segment.end - segment.start) + 1.12
-    const height = BRICK_HEIGHT * (segment.maxY - segment.minY) + 0.78
     return {
-      position: [centerX, centerY, gridToWorldZ(segment.z)],
-      size: [width, height, 1.12],
-      tint: segment.maxY >= 3 ? '#d4cec3' : '#b7b0a6',
+      position: [gridToWorldX(brick.x), layerToWorldY(brick.y), gridToWorldZ(brick.z)],
+      size: [BRICK_SIZE_XZ, BRICK_SIZE_Y, BRICK_SIZE_XZ],
+      tint,
     }
   })
 
   if (!placements.length) {
-    placements.push({ position: [0, 0.39, 0], size: [2.7, 0.78, 2.7], tint: '#9c7b53' })
+    placements.push({ position: [0, 0.39, 0], size: [2.7, 0.82, 2.7], tint: '#9c7b53' })
   }
 
   return placements
@@ -198,12 +154,21 @@ export const designBounds = (design: CastleDesign): { minX: number; maxX: number
 
 const columnHeight = (design: CastleDesign, x: number, z: number): number => {
   const normalized = normalizeCastleDesign(design)
-  let maxY = 0
-  normalized.bricks.forEach((brick) => {
-    if (brick.x === x && brick.z === z) {
-      maxY = Math.max(maxY, brick.y)
-    }
-  })
+  let maxY = -1
+
+  for (let radius = 0; radius <= 2 && maxY < 0; radius += 1) {
+    normalized.bricks.forEach((brick) => {
+      const distance = Math.abs(brick.x - x) + Math.abs(brick.z - z)
+      if (distance <= radius) {
+        maxY = Math.max(maxY, brick.y)
+      }
+    })
+  }
+
+  if (maxY < 0) {
+    return layerToWorldY(0) + 0.55
+  }
+
   return layerToWorldY(maxY) + 0.55
 }
 
@@ -220,8 +185,29 @@ export const designCannonAnchors = (design: CastleDesign): Array<[number, number
 }
 
 export const designCaptainAnchor = (design: CastleDesign): [number, number, number] => {
-  const bounds = designBounds(design)
-  const centerX = Math.round((bounds.minX + bounds.maxX) * 0.5)
-  const centerZ = Math.round((bounds.minZ + bounds.maxZ) * 0.5)
-  return [gridToWorldX(centerX), columnHeight(design, centerX, centerZ) + 0.7, gridToWorldZ(centerZ)]
+  const normalized = normalizeCastleDesign(design)
+  const bounds = designBounds(normalized)
+  const centerX = (bounds.minX + bounds.maxX) * 0.5
+  const centerZ = (bounds.minZ + bounds.maxZ) * 0.5
+
+  const best = normalized.bricks.reduce<CastleBrick | null>((candidate, brick) => {
+    if (!candidate) {
+      return brick
+    }
+
+    const candidateDistance = Math.hypot(candidate.x - centerX, candidate.z - centerZ)
+    const brickDistance = Math.hypot(brick.x - centerX, brick.z - centerZ)
+
+    if (brick.y !== candidate.y) {
+      return brick.y > candidate.y ? brick : candidate
+    }
+
+    return brickDistance < candidateDistance ? brick : candidate
+  }, null)
+
+  if (!best) {
+    return [0, layerToWorldY(0) + 0.7, 0]
+  }
+
+  return [gridToWorldX(best.x), columnHeight(design, best.x, best.z) + 0.7, gridToWorldZ(best.z)]
 }
